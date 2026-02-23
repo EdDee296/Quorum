@@ -1,14 +1,12 @@
-Quorum: Cell Segmentation Comparison
+# Quorum: Cell Segmentation Comparison
 
-This project compares two independent model architectures on the same microscopy dataset and
-evaluates them against Weka predictions. The goal is reproducible and fair comparison using a
-shared data pipeline.
+This project compares two independent model architectures on the same microscopy dataset and evaluates them against Weka predictions. The goal is reproducible and fair comparison using a shared data pipeline.
 
-Code is versioned on GitHub. Data is stored on Google Drive. Training is typically run in
-Google Colab or locally.
+Code is versioned on GitHub. Data is stored on Google Drive. Training is typically run in Google Colab or locally.
 
-Project Structure
------------------
+## Project Structure
+
+```text
 quorum/
 │
 ├── data_utils/
@@ -24,35 +22,38 @@ quorum/
 ├── val_ids.txt
 ├── requirements.txt
 └── README.md
+```
 
-Dataset Location
-----------------
+## Dataset Location
+
 Data lives on shared Google Drive and is not stored in this repository.
 
 Expected folder structure:
 
+```text
 CMPUT469_Cell/
 ├── Microscopy_images/
 ├── Ground_truth_masks/
+```
 
-Do not copy dataset files into the repo.
+**Note:** Do not copy dataset files into the repo.
 
-Setup Instructions (Google Colab)
---------------------------------
-Step 1: Mount Google Drive
+## Setup Instructions (Google Colab)
+
+### Step 1: Mount Google Drive
 
 ```python
 from google.colab import drive
 drive.mount('/content/drive')
 ```
 
-Step 2: Clone repository
+### Step 2: Clone repository
 
 ```bash
 !git clone https://github.com/your-username/quorum.git
 ```
 
-Step 3: Import shared dataset
+### Step 3: Import shared dataset
 
 ```python
 import sys
@@ -61,7 +62,7 @@ sys.path.append('/content/quorum')
 from data_utils.dataset import CellDataset
 ```
 
-Step 4: Load dataset
+### Step 4: Load dataset
 
 ```python
 from torch.utils.data import DataLoader
@@ -73,8 +74,8 @@ images, masks = next(iter(loader))
 print(images.shape, masks.shape)
 ```
 
-Using config.yaml
------------------
+## Using config.yaml
+
 `config.yaml` defines where the dataset is stored.
 
 Default configuration for Colab:
@@ -93,34 +94,31 @@ data_root: /your/local/path/CMPUT469_Cell
 
 Do not hardcode paths inside notebooks or scripts.
 
-Team Responsibilities
----------------------
-Data Pipeline Owner
+## Team Responsibilities
+
+### Data Pipeline
 
 - maintains `dataset.py`
 - defines preprocessing
-- defines validation split
 - maintains `config.yaml`
 
-Architecture Teams
+### Architecture Teams
 
 - implement model inside their folder
 - import `CellDataset` from `data_utils`
 - do not modify shared modules
 - save predictions to Google Drive using original Cell IDs
 
-Evaluation
+### Evaluation
 
 - compares predictions from both teams
 - computes Dice and IoU metrics
 - uses fixed validation IDs from `val_ids.txt`
 
-Reproducibility Rules
----------------------
+## Reproducibility Rules
+
 - Do not modify `dataset.py`
 - Use validation IDs from `val_ids.txt`
 - Use `config.yaml` for all paths
 - Do not store dataset files in the repository
 - Save predictions with original Cell ID filenames
-
-

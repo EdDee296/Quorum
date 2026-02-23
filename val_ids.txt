@@ -1,0 +1,4 @@
+# List of validation cell IDs (one per line), e.g.:
+# 01
+# 02
+# ...
