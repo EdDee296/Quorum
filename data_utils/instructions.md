@@ -1,10 +1,11 @@
-# 🛠️ Data Pipeline Technical Instructions
+# Data Pipeline Technical Instructions
 
-This document explains how to use the `data_utils/dataset.py` module. As the Data Input Owner, I have standardized this pipeline to ensure everyone is training and evaluating on the same processed images.
+This document explains how to use the `data_utils/dataset.py` module. I have standardized this pipeline to ensure everyone is training and evaluating on the same processed images.
 
 ---
 
-## 🚀 Quick Start
+
+## Quick Start
 
 To use the dataset in your notebook or script:
 
@@ -14,27 +15,38 @@ from data_utils.dataset import CellDataset
 # 1. Load the fixed validation IDs from the text file
 val_ids = CellDataset.load_split_ids('val_ids.txt')
 
-# 2. Instantiate for Training (Apply augmentations, exclude val_ids)
-# Note: You'll need to define your 'train_ids' by excluding 'val_ids' from the full list
+# 2. Read config.yaml for all parameters (recommended)
+import yaml
+with open('config.yaml', 'r') as f:
+    config = yaml.safe_load(f)
+
+# 3. Define your 'train_ids' by excluding val_ids from the full list
+# (Assume you have a helper or logic for this)
+
+# 4. Instantiate for Training (Apply augmentations, exclude val_ids)
 train_ds = CellDataset(
-    root_dir='/content/drive/MyDrive/CMPUT469_Cell',
-    preprocess_mode='full',
-    aug_strength='standard',
+    root_dir=config['data_root'],
+    preprocess_mode=config['preprocess_mode'],
+    aug_strength=config['augmentation'],
+    target_size=tuple(config['target_size']),
     split_ids=train_ids
 )
 
-# 3. Instantiate for Evaluation (No augmentations, use ONLY val_ids)
+# 5. Instantiate for Evaluation (No augmentations, use ONLY val_ids)
 val_ds = CellDataset(
-    root_dir='/content/drive/MyDrive/CMPUT469_Cell',
-    preprocess_mode='full',
+    root_dir=config['data_root'],
+    preprocess_mode=config['preprocess_mode'],
     aug_strength=None,
+    target_size=tuple(config['target_size']),
     split_ids=val_ids
 )
 ```
 
+**Best Practice:** You should read `data_root` and other parameters from `config.yaml` instead of hardcoding them. This ensures all team members use the same settings and makes your code portable between Colab and local environments.
+
 ---
 
-## 🖼️ Preprocessing Modes
+## Preprocessing Modes
 
 The `preprocess_mode` parameter is **strict**. If you pass anything other than these two, the code will raise a `ValueError`.
 
@@ -45,7 +57,7 @@ The `preprocess_mode` parameter is **strict**. If you pass anything other than t
 
 ---
 
-## 🧪 Output Format
+## Output Format
 
 Every item returned by `dataset[i]` follows this format:
 
@@ -60,7 +72,7 @@ Every item returned by `dataset[i]` follows this format:
 
 ---
 
-## 🔄 Augmentation Strengths
+## Augmentation Strengths
 
 The `aug_strength` parameter controls the albumentations pipeline:
 
@@ -70,7 +82,7 @@ The `aug_strength` parameter controls the albumentations pipeline:
 
 ---
 
-## 📂 Expected Data Structure
+## Expected Data Structure
 
 The `root_dir` you pass must contain these exact folder names:
 
@@ -82,6 +94,6 @@ Dataset_Root/
 
 ---
 
-## 📜 Helper Methods
+## Helper Methods
 
 `CellDataset.load_split_ids(path)`: Use this to read `val_ids.txt`. It returns a list of strings that you can pass directly into the `split_ids` argument of the class constructor.

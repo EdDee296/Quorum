@@ -1,124 +1,138 @@
-# Quorum: Cell Segmentation Comparison
+# Quorum: Cell Segmentation Benchmark
 
-This project compares two independent model architectures on the same microscopy dataset and evaluates them against Weka predictions. The goal is reproducible and fair comparison using a shared data pipeline.
+This repository enables a **reproducible, fair comparison** of two independent model architectures for microscopy cell segmentation. All teams use a shared data pipeline and fixed validation split. Code is versioned on GitHub; data is stored on Google Drive.
 
-Code is versioned on GitHub. Data is stored on Google Drive. Training is typically run in Google Colab or locally.
+---
 
 ## Project Structure
 
-```text
+```
 quorum/
-│
 ├── data_utils/
 │   └── dataset.py
-│
 ├── architecture_team_1/
 ├── architecture_team_2/
-│
 ├── evaluation/
-│   └── compare_models.ipynb
-│
 ├── config.yaml
 ├── val_ids.txt
 ├── requirements.txt
 └── README.md
 ```
 
+---
+
 ## Dataset Location
 
-Data lives on shared Google Drive and is not stored in this repository.
+**Data is NOT stored in this repo.**
 
-Expected folder structure:
+On Google Drive, expected structure:
 
-```text
+```
 CMPUT469_Cell/
 ├── Microscopy_images/
 ├── Ground_truth_masks/
 ```
 
-**Note:** Do not copy dataset files into the repo.
+**Never copy dataset files into the repository.**
 
-## Setup Instructions (Google Colab)
+---
 
-### Step 1: Mount Google Drive
+## Quick Start (Google Colab)
 
-```python
-from google.colab import drive
-drive.mount('/content/drive')
-```
+1. **Mount Google Drive**
+	```python
+	from google.colab import drive
+	drive.mount('/content/drive')
+	```
+2. **Clone this repository**
+	```bash
+	!git clone https://github.com/your-username/quorum.git
+	```
+3. **Import the shared dataset module**
+	```python
+	import sys
+	sys.path.append('/content/quorum')
+	from data_utils.dataset import CellDataset
+	```
+4. **Load the dataset**
+	```python
+	from torch.utils.data import DataLoader
+	dataset = CellDataset()
+	loader = DataLoader(dataset, batch_size=4, shuffle=True)
+	images, masks = next(iter(loader))
+	print(images.shape, masks.shape)
+	```
 
-### Step 2: Clone repository
+---
 
-```bash
-!git clone https://github.com/your-username/quorum.git
-```
+## Configuration (`config.yaml`)
 
-### Step 3: Import shared dataset
+All paths and parameters are set in `config.yaml`.
 
-```python
-import sys
-sys.path.append('/content/quorum')
-
-from data_utils.dataset import CellDataset
-```
-
-### Step 4: Load dataset
-
-```python
-from torch.utils.data import DataLoader
-
-dataset = CellDataset()
-loader = DataLoader(dataset, batch_size=4, shuffle=True)
-
-images, masks = next(iter(loader))
-print(images.shape, masks.shape)
-```
-
-## Using config.yaml
-
-`config.yaml` defines where the dataset is stored.
-
-Default configuration for Colab:
-
+**Colab default:**
 ```yaml
 data_root: /content/drive/MyDrive/CMPUT469_Cell
 image_size: 256
 batch_size: 8
 ```
 
-If running locally, update only the `data_root` path:
-
+**Local:**
 ```yaml
 data_root: /your/local/path/CMPUT469_Cell
 ```
 
-Do not hardcode paths inside notebooks or scripts.
+**Never hardcode paths** in notebooks or scripts—always use `config.yaml`.
+
+---
 
 ## Team Responsibilities
 
-### Data Pipeline
-
-- maintains `dataset.py`
-- defines preprocessing
-- maintains `config.yaml`
+### Data Pipeline Team
+- Maintains `dataset.py` and `config.yaml`
+- Defines preprocessing and validation split
 
 ### Architecture Teams
+- Implement models in their own folders
+- Import `CellDataset` from `data_utils`
+- **Do not modify shared modules**
+- Save predictions to Google Drive using original Cell IDs
 
-- implement model inside their folder
-- import `CellDataset` from `data_utils`
-- do not modify shared modules
-- save predictions to Google Drive using original Cell IDs
+### Evaluation Team
+- Compares predictions from both teams
+- Computes Dice and IoU metrics
+- Uses fixed validation IDs from `val_ids.txt`
 
-### Evaluation
-
-- compares predictions from both teams
-- computes Dice and IoU metrics
-- uses fixed validation IDs from `val_ids.txt`
+---
 
 ## Reproducibility Rules
 
-- Do not modify `dataset.py`
-- Use validation IDs from `val_ids.txt`
-- Use `config.yaml` for all paths
-- Do not store dataset files in the repository
-- Save predictions with original Cell ID filenames
+- **Do not modify** `dataset.py`
+- **Always use** validation IDs from `val_ids.txt`
+- **Always use** `config.yaml` for all paths
+- **Never store** dataset files in the repository
+- **Save predictions** with original Cell ID filenames
+
+---
+
+## Validation Split (`val_ids.txt`)
+
+- 200 microscopy images total
+- 80/20 split: 160 train, 40 validation
+- Validation IDs are listed in `val_ids.txt` (one Cell ID per line)
+- File was generated once with a fixed random seed—**do not modify**
+
+> Changing `val_ids.txt` breaks reproducibility and invalidates model comparison.
+
+---
+
+## How to Use the Validation Split
+
+**You can use the helper in `data_utils/dataset.py` to obtain the split.**
+
+The helper:
+- Reads `val_ids.txt`
+- Separates training and validation IDs
+- Ensures consistency across all teams
+
+**Please don't redefine validation IDs in notebooks or scripts.**
+
