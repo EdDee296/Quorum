@@ -12,18 +12,23 @@ class CellDataset(Dataset):
     Returns image tensor (1,H,W) and mask tensor (H,W) with labels {0,1,2}.
     """
 
-    def __init__(self, root_dir, preprocess_mode='basic', aug_strength='standard', target_size=(256, 256), split_ids=None):
+    def __init__(self, root_dir, preprocess_mode='full', aug_strength='standard', target_size=(256, 256), split_ids=None):
         self.root_dir = root_dir
         self.img_dir = os.path.join(root_dir, 'Microscopy_images')
-        
+
         # Handle potential folder typos
         alt1 = os.path.join(root_dir, 'Ground_truth_masks')
         alt2 = os.path.join(root_dir, 'Groud_truth_masks')
         self.mask_dir = alt1 if os.path.exists(alt1) else alt2
-        
+
         self.preprocess_mode = preprocess_mode
         self.target_size = target_size
-        self.aug = self._make_augmentation(aug_strength, target_size=target_size)
+
+        allowed_aug = {'none', 'light', 'standard'}
+        if not isinstance(aug_strength, str) or aug_strength.lower() not in allowed_aug:
+            raise ValueError(f"aug_strength must be one of {allowed_aug} (case-insensitive string). Got: {aug_strength}")
+        self.aug_strength = aug_strength.lower()
+        self.aug = self._make_augmentation(self.aug_strength, target_size=target_size)
 
         self.samples = self._find_samples(split_ids)
         if len(self.samples) == 0:
@@ -38,7 +43,7 @@ class CellDataset(Dataset):
         with open(file_path, 'r') as f:
             return [line.strip() for line in f if line.strip()]
 
-    def _make_augmentation(self, strength, target_size=None):
+    def _make_augmentation(self, strength, target_size):
         transforms = []
         if strength == 'light':
             transforms.extend([
@@ -57,7 +62,7 @@ class CellDataset(Dataset):
                 A.ElasticTransform(alpha=120, sigma=120 * 0.05, p=0.3),
                 A.RandomBrightnessContrast(brightness_limit=0.15, contrast_limit=0.15, p=0.3),
             ])
-        
+        # 'none' means only resizing
         if target_size is not None:
             transforms.append(A.Resize(height=target_size[0], width=target_size[1], 
                                        interpolation=cv2.INTER_LINEAR, 
@@ -128,8 +133,5 @@ class CellDataset(Dataset):
         if self.aug is not None:
             augmented = self.aug(image=img_pp, mask=mask)
             img_pp, mask = augmented['image'], augmented['mask']
-        elif self.target_size is not None:
-            img_pp = cv2.resize(img_pp, self.target_size, interpolation=cv2.INTER_LINEAR)
-            mask = cv2.resize(mask, self.target_size, interpolation=cv2.INTER_NEAREST)
 
         return torch.from_numpy(img_pp).unsqueeze(0).float(), torch.from_numpy(mask.astype(np.int64))

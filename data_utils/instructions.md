@@ -23,11 +23,17 @@ with open('config.yaml', 'r') as f:
 # 3. Define your 'train_ids' by excluding val_ids from the full list
 # (Assume you have a helper or logic for this)
 
+"""
+Augmentation strength must be a string: 'none', 'light', or 'standard' (case-insensitive).
+Use 'none' for no augmentation (only resizing), 'light' for flips/rotations, 'standard' for full augmentations.
+Passing None or any other value will raise an error.
+"""
+
 # 4. Instantiate for Training (Apply augmentations, exclude val_ids)
 train_ds = CellDataset(
     root_dir=config['data_root'],
     preprocess_mode=config['preprocess_mode'],
-    aug_strength=config['augmentation'],
+    aug_strength=str(config['augmentation']).lower(),  # must be 'none', 'light', or 'standard'
     target_size=tuple(config['target_size']),
     split_ids=train_ids
 )
@@ -36,13 +42,16 @@ train_ds = CellDataset(
 val_ds = CellDataset(
     root_dir=config['data_root'],
     preprocess_mode=config['preprocess_mode'],
-    aug_strength=None,
+    aug_strength='none',  # must be string 'none' for no augmentation
     target_size=tuple(config['target_size']),
     split_ids=val_ids
 )
 ```
 
-**Best Practice:** You should read `data_root` and other parameters from `config.yaml` instead of hardcoding them. This ensures all team members use the same settings and makes your code portable between Colab and local environments.
+**Best Practice:**
+- Always use a string for `aug_strength`: 'none', 'light', or 'standard' (case-insensitive).
+- Do not use `None` or other values.
+- Read `data_root` and other parameters from `config.yaml` instead of hardcoding them. This ensures all team members use the same settings and makes your code portable between Colab and local environments.
 
 ---
 
