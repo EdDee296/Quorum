@@ -82,17 +82,17 @@ target_size: [256, 256]        # [height, width] for resizing images and masks
 
 ## Team Responsibilities
 
-### Data Pipeline Team
+### Data Pipeline 
 - Maintains `dataset.py` and `config.yaml`
 - Defines preprocessing and validation split
 
-### Architecture Teams
+### Architecture 
 - Implement models in their own folders
 - Import `CellDataset` from `data_utils`
 - **Do not modify shared modules**
 - Save predictions to Google Drive using original Cell IDs
 
-### Evaluation Team
+### Evaluation 
 - Compares predictions from both teams
 - Computes Dice and IoU metrics
 - Uses fixed validation IDs from `val_ids.txt`
