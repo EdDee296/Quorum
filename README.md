@@ -65,23 +65,20 @@ CMPUT469_Cell/
 
 ---
 
+
 ## Configuration (`config.yaml`)
 
-All paths and parameters are set in `config.yaml`.
+All paths and parameters are set in `config.yaml`. **Never hardcode paths** in notebooks or scripts—always use `config.yaml`.
 
-**Colab default:**
+Current fields:
 ```yaml
-data_root: /content/drive/MyDrive/CMPUT469_Cell
-image_size: 256
-batch_size: 8
+data_root: /content/drive/MyDrive/CMPUT469_Cell  # Path to dataset root (update if running locally)
+preprocess_mode: basic         # 'basic' or 'full' (see instructions)
+augmentation: standard         # 'none', 'light', or 'standard'
+target_size: [256, 256]        # [height, width] for resizing images and masks
 ```
 
-**Local:**
-```yaml
-data_root: /your/local/path/CMPUT469_Cell
-```
-
-**Never hardcode paths** in notebooks or scripts—always use `config.yaml`.
+**If your data is stored elsewhere, update only the `data_root` field in your local config.yaml.**
 
 ---
 
