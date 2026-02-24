@@ -12,3 +12,7 @@ models/
 predictions/
 /venv/
 config.yaml
+
+# Training outputs
+architecture_team_1/unetpp/runs_unetpp/
+architecture_team_1/unetpp/outputs_unetpp/

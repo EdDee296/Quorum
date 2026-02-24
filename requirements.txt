@@ -4,3 +4,6 @@ albumentations
 torch
 torchvision
 matplotlib
+
+segmentation-models-pytorch
+pandas
