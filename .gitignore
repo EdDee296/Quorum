@@ -2,7 +2,9 @@ __pycache__/
 *.pyc
 .env
 .DS_Store
+.idea/
 /data/
+CMPUT469_Cell/
 *.ipynb_checkpoints
 *.pth
 *.pt
@@ -11,8 +13,11 @@ __pycache__/
 models/
 predictions/
 /venv/
+.venv/
 config.yaml
 
 # Training outputs
 architecture_team_1/unetpp/runs_unetpp/
 architecture_team_1/unetpp/outputs_unetpp/
+architecture_team_2/unet/runs_unet/
+architecture_team_2/unet/outputs_unet/

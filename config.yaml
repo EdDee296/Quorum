@@ -1,5 +1,4 @@
 data_root: /content/drive/MyDrive/CMPUT469_Cell  # Path to dataset root (update if running locally)
-# data_root: /mnt/c/Users/Zahid/OneDrive/Desktop/CMPUT469_Cell # for local WSL (Zahid only) (will remove before merging to main)
 preprocess_mode: basic         # 'basic' or 'full' (see instructions)
 augmentation: standard         # 'none', 'light', or 'standard'
 target_size: [256, 256]        # [height, width] for resizing images and masks
