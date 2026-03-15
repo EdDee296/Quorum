@@ -2,6 +2,9 @@ __pycache__/
 *.pyc
 .env
 .DS_Store
+/backend/.venv/
+/backend/__pycache__/
+/node_modules/.vite/
 /data/
 *.ipynb_checkpoints
 *.pth
