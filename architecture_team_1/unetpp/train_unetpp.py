@@ -27,6 +27,8 @@ python -m architecture_team_1.unetpp.train_unetpp
 outputs
 - best checkpoint
   architecture_team_1/unetpp/runs_unetpp/best_unetpp.pt
+- backend copy of best checkpoint
+  backend/models/best_unetpp.pt
 - training log
   architecture_team_1/unetpp/runs_unetpp/train_log.csv
 """
@@ -238,7 +240,8 @@ def main():
 
     outputs:
     - best_unetpp.pt saved in runs_unetpp/
-    - train_log.csv saved in runs_unetpp/
+    - best_unetpp.pt copied to backend/models/
+    - train_log.csv saved in runs_unetpp/   
     """
     cfg = load_config()
 
@@ -306,6 +309,9 @@ def main():
     best_val_dice2 = -1.0
     best_path = os.path.join(out_dir, "best_unetpp.pt")
 
+    backend_best_path = os.path.join("backend", "models", "best_unetpp.pt")
+    os.makedirs(os.path.join("backend", "models"), exist_ok=True)
+
     log_path = os.path.join(out_dir, "train_log.csv")
     if not os.path.exists(log_path):
         with open(log_path, "w", encoding="utf-8") as f:
@@ -346,19 +352,22 @@ def main():
 
         if val_dice2 > best_val_dice2:
             best_val_dice2 = val_dice2
-            torch.save(
-                {
-                    "model_state_dict": model.state_dict(),
-                    "epoch": epoch,
-                    "val_dice_class1": val_dice1,
-                    "val_iou_class1": val_iou1,
-                    "val_dice_class2": val_dice2,
-                    "val_iou_class2": val_iou2,
-                    "config": cfg,
-                },
-                best_path,
-            )
+
+            checkpoint_data = {
+                "model_state_dict": model.state_dict(),
+                "epoch": epoch,
+                "val_dice_class1": val_dice1,
+                "val_iou_class1": val_iou1,
+                "val_dice_class2": val_dice2,
+                "val_iou_class2": val_iou2,
+                "config": cfg,
+            }
+
+            torch.save(checkpoint_data, best_path)
+            torch.save(checkpoint_data, backend_best_path)
+
             print("Saved best >", best_path)
+            print("Saved backend copy >", backend_best_path)
 
         epoch += 1
 

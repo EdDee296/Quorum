@@ -108,7 +108,7 @@ export function MaskEditor({
 
       for (let i = 0; i < imageData.data.length; i += 4) {
         const a = imageData.data[i + 3];
-        // Treat any visible pixel as mask foreground. This preserves black brush edits.
+        // treat any visible pixel as mask foreground
         const isMaskPixel = a > 0;
 
         imageData.data[i] = 0;
@@ -121,6 +121,44 @@ export function MaskEditor({
     };
 
     maskImg.src = maskDataUrl;
+  };
+
+  const tintMaskDataUrl = (
+    maskDataUrl: string,
+    color: [number, number, number],
+  ): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+
+        if (!ctx) {
+          reject(new Error('Unable to create tint canvas'));
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+        for (let i = 0; i < imageData.data.length; i += 4) {
+          const alpha = imageData.data[i + 3] > 0 ? 255 : 0;
+
+          imageData.data[i] = alpha > 0 ? color[0] : 0;
+          imageData.data[i + 1] = alpha > 0 ? color[1] : 0;
+          imageData.data[i + 2] = alpha > 0 ? color[2] : 0;
+          imageData.data[i + 3] = alpha > 0 ? 255 : 0;
+        }
+
+        ctx.putImageData(imageData, 0, 0);
+        resolve(canvas.toDataURL('image/png'));
+      };
+
+      img.onerror = () => reject(new Error('Unable to load mask for tinting'));
+      img.src = maskDataUrl;
+    });
   };
 
   const getPointerPosition = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -203,7 +241,7 @@ export function MaskEditor({
     ctx.lineTo(to.x, to.y);
     ctx.stroke();
 
-    // Ensure single-click produces a visible dot.
+    // make sure single click makes a dot
     ctx.beginPath();
     ctx.arc(to.x, to.y, brushDiameter / 2, 0, Math.PI * 2);
     ctx.fill();
@@ -223,7 +261,7 @@ export function MaskEditor({
       return;
     }
 
-    // Store masks as strict binary alpha so erasing is deterministic.
+    // store masks as strict binary alpha
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     for (let i = 0; i < imageData.data.length; i += 4) {
       const alpha = imageData.data[i + 3] > 127 ? 255 : 0;
@@ -248,8 +286,14 @@ export function MaskEditor({
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      await updateMasks(fileName, masks);
-      onSave(masks);
+      const coloredMasks = {
+        chromocenter: await tintMaskDataUrl(masks.chromocenter, [226, 72, 12]),
+        nuclei: await tintMaskDataUrl(masks.nuclei, [38, 120, 142]),
+        background: await tintMaskDataUrl(masks.background, [164, 204, 212]),
+      };
+
+      await updateMasks(fileName, coloredMasks);
+      onSave(coloredMasks);
       onClose();
     } catch (error) {
       console.error('Failed to save masks:', error);

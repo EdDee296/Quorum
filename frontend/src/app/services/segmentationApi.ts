@@ -18,11 +18,13 @@ export interface ProcessedImage {
 /**
  * Upload and process an image through the segmentation model
  * @param file - The image file to process
+ * @param modelName - Which model to use
  * @returns Promise with segmentation results
  */
-export async function processImage(file: File): Promise<SegmentationResult> {
+export async function processImage(file: File, modelName: string): Promise<SegmentationResult> {
   const formData = new FormData();
   formData.append('file', file);
+  formData.append('model_name', modelName);
 
   const [localImageUrl, response] = await Promise.all([
     readFileAsDataUrl(file),
@@ -47,17 +49,10 @@ export async function processImage(file: File): Promise<SegmentationResult> {
     : data.mask_base64;
   const semanticDataUrl = ensureDataUrl(rawMask);
 
-  // Semantic mask pixel values:
-  //   0   → background (outside nucleus)
-  //   128 → nucleoplasm (inside nucleus, not chromocenter)
-  //   255 → chromocenter
-  //
-  // When a grayscale PNG is drawn to a canvas, each pixel's R channel equals
-  // the grayscale value, so we threshold on imageData.data[i] (the R channel).
   const chromocenterMask  = await colorizeMask(semanticDataUrl, [226, 72, 12],   (r) => r >= 200);
-  const nucleiMask        = await createBlankMask(semanticDataUrl);
-  const backgroundMask    = await createBlankMask(semanticDataUrl);
-  const segmentedImageUrl = await overlayMaskOnImage(imageUrl, semanticDataUrl);
+  const nucleiMask        = await colorizeMask(semanticDataUrl, [38, 120, 142], (r) => r >= 100 && r < 200);
+  const backgroundMask    = await colorizeMask(semanticDataUrl, [164, 204, 212], (r) => r < 100);
+  const segmentedImageUrl = await overlayMaskOnImage(imageUrl, chromocenterMask);
 
   return {
     imageUrl,
@@ -82,25 +77,57 @@ export async function updateMasks(
     background: string;
   }
 ): Promise<void> {
-  // No backend persistence endpoint exists yet for edited masks.
   console.log('Saving masks for:', fileName, masks);
   return Promise.resolve();
 }
 
 /**
+ * Download TIFF masks for a processed image
+ */
+export async function downloadMasks(processedImage: ProcessedImage): Promise<void> {
+  const response = await fetch(`${BASE_URL}/download-masks`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      file_name: processedImage.fileName,
+      chromocenter_mask: processedImage.result.chromocenterMask,
+      nuclei_mask: processedImage.result.nucleiMask,
+      background_mask: processedImage.result.backgroundMask,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to download masks');
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = processedImage.fileName.replace(/\.[^/.]+$/, '') + '_masks.zip';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  window.URL.revokeObjectURL(url);
+}
+
+/**
  * Process multiple images in batch
- * @param files - Array of image files
- * @param onProgress - Callback for progress updates
  */
 export async function processBatch(
   files: File[],
+  modelName: string,
   onProgress?: (current: number, total: number) => void
 ): Promise<ProcessedImage[]> {
   const results: ProcessedImage[] = [];
   
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
-    const result = await processImage(file);
+    const result = await processImage(file, modelName);
     results.push({
       file,
       fileName: file.name,
@@ -190,7 +217,7 @@ function overlayMaskOnImage(imageDataUrl: string, maskDataUrl: string): Promise<
       }
 
       context.drawImage(image, 0, 0);
-      context.globalAlpha = 0.45;
+      context.globalAlpha = 0.60;
       context.drawImage(mask, 0, 0, canvas.width, canvas.height);
       context.globalAlpha = 1;
 
@@ -202,7 +229,6 @@ function overlayMaskOnImage(imageDataUrl: string, maskDataUrl: string): Promise<
       tryCompose();
     };
     image.onerror = () => {
-      // Do not fail processing if preview composition cannot be generated.
       resolve(maskDataUrl);
     };
 

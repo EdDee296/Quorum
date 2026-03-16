@@ -11,6 +11,7 @@ export function UploadPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processedCount, setProcessedCount] = useState(0);
   const [editingImage, setEditingImage] = useState<ProcessedImage | null>(null);
+  const [modelName, setModelName] = useState('unetpp');
   const navigate = useNavigate();
 
   const handleImagesSelected = async (files: File[]) => {
@@ -21,7 +22,7 @@ export function UploadPage() {
 
     try {
       // Process images using the API service
-      const results = await processBatch(files, (current, total) => {
+        const results = await processBatch(files, modelName, (current, total) => {
         setProcessedCount(current);
       });
       
@@ -66,6 +67,25 @@ export function UploadPage() {
     <main className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
       {selectedImages.length === 0 ? (
         <div className="max-w-2xl mx-auto">
+          <div className="mb-4">
+            <label style={{ color: '#304C64' }}>Select Model:</label>
+            <select
+              value={modelName}
+              onChange={(e) => setModelName(e.target.value)}
+              style={{
+                marginLeft: '10px',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                border: '1px solid #26788E',
+                color: '#304C64',
+                backgroundColor: 'white',
+              }}
+            >
+              <option value="unetpp">U-Net++</option>
+              <option value="cellpose">Cellpose</option>
+            </select>
+          </div>
+
           <ImageUploader onImagesSelected={handleImagesSelected} />
           <div className="mt-8 rounded-lg p-4" style={{ backgroundColor: '#A4CCD4', borderColor: '#26788E', borderWidth: '1px' }}>
             <h3 className="text-sm mb-2" style={{ color: '#304C64' }}>About this tool</h3>

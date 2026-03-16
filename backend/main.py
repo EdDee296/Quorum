@@ -1,14 +1,21 @@
 import os
 import cv2
+import io
+import zipfile
 import base64
 import numpy as np
-from fastapi import FastAPI, UploadFile, File, HTTPException
+import tifffile as tiff
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from cellpose import models
+
+from architecture_team_1.unetpp.infer_unetpp import load_unetpp_model, run_unetpp_inference
 
 app = FastAPI()
 
-# Allow frontend to communicate with backend
+# let frontend talk to backend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -17,11 +24,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize models
-print("Loading Cellpose Models...")
+# load models
+print("Loading models...")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# ── Chromocenter model (required) ─────────────────────────────────────────────
+# -----------------------------
+# Cellpose models
+# -----------------------------
 MODEL_PATH_AUG = os.path.join(BASE_DIR, "models", "cp_chromo_aug")
 MODEL_PATH_NO_AUG = os.path.join(BASE_DIR, "models", "cp_chromo_no_aug")
 MODEL_SOURCE = None
@@ -32,7 +41,7 @@ for candidate_path in [MODEL_PATH_AUG, MODEL_PATH_NO_AUG]:
     if not os.path.exists(candidate_path):
         continue
     try:
-        print(f"Loading chromocenter model from {candidate_path}")
+        print(f"Loading Cellpose chromocenter model from {candidate_path}")
         model = models.CellposeModel(gpu=False, pretrained_model=candidate_path)
         MODEL_SOURCE = candidate_path
         break
@@ -47,10 +56,9 @@ if model is None:
     )
     print(MODEL_LOAD_ERROR)
 
-# ── Nucleus model (optional until trained) ────────────────────────────────────
+# nucleus model for Cellpose
 NUCLEUS_MODEL_CANDIDATES = [
     os.path.join(BASE_DIR, "models", "cp_nucleus"),
-    # Cellpose train() may append another "models" level depending on save_path.
     os.path.join(BASE_DIR, "models", "models", "cp_nucleus"),
 ]
 nucleus_model = None
@@ -62,7 +70,7 @@ for nucleus_path in NUCLEUS_MODEL_CANDIDATES:
         continue
 
     try:
-        print(f"Loading nucleus model from {nucleus_path}")
+        print(f"Loading Cellpose nucleus model from {nucleus_path}")
         nucleus_model = models.CellposeModel(gpu=False, pretrained_model=nucleus_path)
         NUCLEUS_MODEL_SOURCE = nucleus_path
         print("Nucleus model loaded successfully")
@@ -74,22 +82,37 @@ if nucleus_model is None:
     print(
         "Nucleus model not found. Checked: "
         + ", ".join(NUCLEUS_MODEL_CANDIDATES)
-        + ". Run the notebook to train cp_nucleus. "
-        "Nucleoplasm segmentation will be unavailable until then."
+        + ". Nucleoplasm segmentation will use fallback if possible."
     )
 
 try:
-    # Always keep a stable fallback for nucleus/background separation.
-    nucleus_fallback_model = models.CellposeModel(gpu=False, model_type='nuclei')
-    print("Loaded pretrained nuclei fallback model for nucleus segmentation")
+    # fallback nucleus model
+    nucleus_fallback_model = models.CellposeModel(gpu=False, model_type="nuclei")
+    print("Loaded pretrained nuclei fallback model for Cellpose")
 except Exception as e:
     print(f"Warning: Failed to load pretrained nuclei fallback model: {e}")
 
 
-def prepare_grayscale_uint8(image: np.ndarray) -> np.ndarray:
-    """Convert input image to single-channel uint8 for stable Cellpose inference.
+# -----------------------------
+# U-Net++ model
+# -----------------------------
+unetpp_model = None
+unetpp_device = None
+unetpp_cfg = None
+UNETPP_SOURCE = None
+UNETPP_LOAD_ERROR = None
 
-    TIFF images are often 16-bit, so this normalizes dynamic range to 8-bit.
+try:
+    unetpp_model, unetpp_device, unetpp_cfg, UNETPP_SOURCE = load_unetpp_model()
+    print(f"Loaded U-Net++ model from {UNETPP_SOURCE}")
+except Exception as e:
+    UNETPP_LOAD_ERROR = f"Failed to load U-Net++ model: {e}"
+    print(UNETPP_LOAD_ERROR)
+
+
+def prepare_grayscale_uint8(image: np.ndarray) -> np.ndarray:
+    """
+    make image single-channel uint8
     """
     if image.ndim == 3:
         image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -106,24 +129,99 @@ def prepare_grayscale_uint8(image: np.ndarray) -> np.ndarray:
     normalized = (image.astype(np.float32) - min_val) / (max_val - min_val)
     return (normalized * 255.0).clip(0, 255).astype(np.uint8)
 
+
+class MaskDownloadRequest(BaseModel):
+    file_name: str
+    chromocenter_mask: str
+    nuclei_mask: str
+    background_mask: str
+
+
+def _data_url_to_binary_mask(mask_data_url: str) -> np.ndarray:
+    """
+    turn a data url mask into a black binary mask
+    """
+    if "," in mask_data_url:
+        encoded = mask_data_url.split(",", 1)[1]
+    else:
+        encoded = mask_data_url
+
+    raw = base64.b64decode(encoded)
+    arr = np.frombuffer(raw, np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
+
+    if img is None:
+        raise ValueError("Could not decode mask image")
+
+    if img.ndim == 2:
+        gray = img
+        alpha = None
+    elif img.shape[2] == 4:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGRA2GRAY)
+        alpha = img[:, :, 3]
+    else:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        alpha = None
+
+    if alpha is not None:
+        binary = np.where(alpha > 0, 0, 255).astype(np.uint8)
+    else:
+        binary = np.where(gray > 0, 0, 255).astype(np.uint8)
+
+    return binary
+
+
+def _build_mask_zip(file_name: str, chromocenter_mask: str, nuclei_mask: str, background_mask: str) -> io.BytesIO:
+    """
+    build a zip with 3 tif masks
+    """
+    base_name = os.path.splitext(file_name)[0]
+
+    chrom_arr = _data_url_to_binary_mask(chromocenter_mask)
+    nuclei_arr = _data_url_to_binary_mask(nuclei_mask)
+    bg_arr = _data_url_to_binary_mask(background_mask)
+
+    zip_buffer = io.BytesIO()
+
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        tif_buffer = io.BytesIO()
+        tiff.imwrite(tif_buffer, chrom_arr)
+        zip_file.writestr(f"{base_name}_chromocenter.tif", tif_buffer.getvalue())
+
+        tif_buffer = io.BytesIO()
+        tiff.imwrite(tif_buffer, nuclei_arr)
+        zip_file.writestr(f"{base_name}_nuclei.tif", tif_buffer.getvalue())
+
+        tif_buffer = io.BytesIO()
+        tiff.imwrite(tif_buffer, bg_arr)
+        zip_file.writestr(f"{base_name}_background.tif", tif_buffer.getvalue())
+
+    zip_buffer.seek(0)
+    return zip_buffer
+
+
 @app.get("/api/health")
 async def health_check():
-    if model is None:
-        raise HTTPException(status_code=503, detail=MODEL_LOAD_ERROR)
-
     return {
         "status": "ok",
-        "model_source": MODEL_SOURCE,
-        "nucleus_model_available": nucleus_model is not None,
+        "cellpose_available": model is not None,
+        "cellpose_model_source": MODEL_SOURCE,
+        "cellpose_nucleus_model_available": nucleus_model is not None,
+        "unetpp_available": unetpp_model is not None,
+        "unetpp_model_source": UNETPP_SOURCE,
+        "cellpose_error": MODEL_LOAD_ERROR,
+        "unetpp_error": UNETPP_LOAD_ERROR,
     }
 
-@app.post("/api/segment")
-async def segment_image(file: UploadFile = File(...)):
-    try:
-        if model is None:
-            raise HTTPException(status_code=503, detail=MODEL_LOAD_ERROR)
 
-        # 1. Read the uploaded image
+@app.post("/api/segment")
+async def segment_image(
+    file: UploadFile = File(...),
+    # model_name: str = Form("cellpose"),
+    model_name: str = Form("unetpp"),
+):
+    try:
+        # read uploaded image
         contents = await file.read()
         nparr = np.frombuffer(contents, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
@@ -134,67 +232,134 @@ async def segment_image(file: UploadFile = File(...)):
                 detail="Invalid image file or unsupported TIFF encoding",
             )
 
-        img = prepare_grayscale_uint8(img)
+        # -----------------------------
+        # Cellpose path
+        # -----------------------------
+        if model_name == "cellpose":
+            if model is None:
+                raise HTTPException(status_code=503, detail=MODEL_LOAD_ERROR)
 
-        # 2a. Run chromocenter model
-        chromo_masks, _flows, _styles = model.eval(img, diameter=None, channels=[0, 0])
-        chromo_instances = np.asarray(chromo_masks)
+            img = prepare_grayscale_uint8(img)
 
-        # 2b. Run nucleus model if available
-        nucleus_instances = None
-        if nucleus_model is not None:
-            nuc_masks, _nf, _ns = nucleus_model.eval(
-                img,
-                diameter=None,
-                channels=[0, 0],
-                flow_threshold=0.4,
-                cellprob_threshold=-2.0,
+            # run chromocenter model
+            chromo_masks, _flows, _styles = model.eval(img, diameter=None, channels=[0, 0])
+            chromo_instances = np.asarray(chromo_masks)
+
+            # run nucleus model if we have it
+            nucleus_instances = None
+            if nucleus_model is not None:
+                nuc_masks, _nf, _ns = nucleus_model.eval(
+                    img,
+                    diameter=None,
+                    channels=[0, 0],
+                    flow_threshold=0.4,
+                    cellprob_threshold=-2.0,
+                )
+                nucleus_instances = np.asarray(nuc_masks)
+
+            # fallback if custom nucleus model is missing or empty
+            if (nucleus_instances is None or np.max(nucleus_instances) == 0) and nucleus_fallback_model is not None:
+                fb_masks, _ff, _fs = nucleus_fallback_model.eval(
+                    img,
+                    diameter=None,
+                    channels=[0, 0],
+                    flow_threshold=0.4,
+                    cellprob_threshold=-2.0,
+                )
+                nucleus_instances = np.asarray(fb_masks)
+
+            # build semantic mask
+            semantic_mask = np.zeros_like(chromo_instances, dtype=np.uint8)
+
+            if nucleus_instances is not None:
+                semantic_mask[nucleus_instances > 0] = 128
+
+            semantic_mask[chromo_instances > 0] = 255
+
+            # encode original image
+            _, original_buffer = cv2.imencode(".png", img)
+            original_base64 = base64.b64encode(original_buffer.tobytes()).decode("utf-8")
+
+            # encode mask
+            _, mask_buffer = cv2.imencode(".png", semantic_mask)
+            mask_base64 = base64.b64encode(mask_buffer.tobytes()).decode("utf-8")
+
+            return {
+                "filename": file.filename,
+                "semantic_mask_base64": f"data:image/png;base64,{mask_base64}",
+                "mask_base64": f"data:image/png;base64,{mask_base64}",
+                "original_base64": f"data:image/png;base64,{original_base64}",
+                "model_name": "cellpose",
+                "model_source": MODEL_SOURCE,
+                "nucleus_model_available": nucleus_model is not None,
+            }
+
+        # -----------------------------
+        # U-Net++ path
+        # -----------------------------
+        elif model_name == "unetpp":
+            if unetpp_model is None:
+                raise HTTPException(status_code=503, detail=UNETPP_LOAD_ERROR)
+
+            result = run_unetpp_inference(
+                image=img,
+                model=unetpp_model,
+                device=unetpp_device,
+                cfg=unetpp_cfg,
             )
-            nucleus_instances = np.asarray(nuc_masks)
 
-        # If custom nucleus model is unavailable or collapses to empty masks,
-        # fall back to pretrained nuclei segmentation so background = outside nucleus.
-        if (nucleus_instances is None or np.max(nucleus_instances) == 0) and nucleus_fallback_model is not None:
-            fb_masks, _ff, _fs = nucleus_fallback_model.eval(
-                img,
-                diameter=None,
-                channels=[0, 0],
-                flow_threshold=0.4,
-                cellprob_threshold=-2.0,
+            prepared_image = result["prepared_image"]
+            semantic_mask = result["semantic_mask"]
+
+            # encode original image
+            _, original_buffer = cv2.imencode(".png", prepared_image)
+            original_base64 = base64.b64encode(original_buffer.tobytes()).decode("utf-8")
+
+            # encode mask
+            _, mask_buffer = cv2.imencode(".png", semantic_mask)
+            mask_base64 = base64.b64encode(mask_buffer.tobytes()).decode("utf-8")
+
+            return {
+                "filename": file.filename,
+                "semantic_mask_base64": f"data:image/png;base64,{mask_base64}",
+                "mask_base64": f"data:image/png;base64,{mask_base64}",
+                "original_base64": f"data:image/png;base64,{original_base64}",
+                "model_name": "unetpp",
+                "model_source": UNETPP_SOURCE,
+                "nucleus_model_available": True,
+            }
+
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown model_name '{model_name}'. Use 'cellpose' or 'unetpp'.",
             )
-            nucleus_instances = np.asarray(fb_masks)
 
-        # 3. Build 3-class semantic mask (grayscale PNG, values 0 / 128 / 255):
-        #      0   = background (outside nucleus)
-        #      128 = nucleoplasm (inside nucleus, not chromocenter)
-        #      255 = chromocenter
-        semantic_mask = np.zeros_like(chromo_instances, dtype=np.uint8)
-
-        if nucleus_instances is not None:
-            # Mark full nucleus region as nucleoplasm
-            semantic_mask[nucleus_instances > 0] = 128
-
-        # Chromocenter pixels override nucleoplasm (always on top)
-        semantic_mask[chromo_instances > 0] = 255
-
-        # 4. Encode browser-safe PNG of the original input
-        _, original_buffer = cv2.imencode('.png', img)
-        original_base64 = base64.b64encode(original_buffer.tobytes()).decode('utf-8')
-
-        # 5. Encode the semantic mask
-        _, mask_buffer = cv2.imencode('.png', semantic_mask)
-        mask_base64 = base64.b64encode(mask_buffer.tobytes()).decode('utf-8')
-
-        return {
-            "filename": file.filename,
-            # semantic_mask carries all three classes (0 / 128 / 255)
-            "semantic_mask_base64": f"data:image/png;base64,{mask_base64}",
-            # legacy alias so older clients keep working
-            "mask_base64": f"data:image/png;base64,{mask_base64}",
-            "original_base64": f"data:image/png;base64,{original_base64}",
-            "model_source": MODEL_SOURCE,
-            "nucleus_model_available": nucleus_model is not None,
-        }
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error processing image: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/download-masks")
+async def download_masks(request: MaskDownloadRequest):
+    try:
+        zip_buffer = _build_mask_zip(
+            file_name=request.file_name,
+            chromocenter_mask=request.chromocenter_mask,
+            nuclei_mask=request.nuclei_mask,
+            background_mask=request.background_mask,
+        )
+
+        base_name = os.path.splitext(request.file_name)[0]
+        zip_name = f"{base_name}_masks.zip"
+
+        return StreamingResponse(
+            zip_buffer,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{zip_name}"'},
+        )
+    except Exception as e:
+        print(f"Error creating mask download: {e}")
         raise HTTPException(status_code=500, detail=str(e))

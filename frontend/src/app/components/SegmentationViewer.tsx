@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { Card } from './ui/card';
-import { ProcessedImage } from '../services/segmentationApi';
+import { ProcessedImage, downloadMasks } from '../services/segmentationApi';
 import { Edit } from 'lucide-react';
 
 interface SegmentationViewerProps {
@@ -22,22 +22,38 @@ export function SegmentationViewer({ processedImage, onEdit }: SegmentationViewe
     <Card className="p-4 border-[#304C64]">
       <div className="flex items-center justify-between mb-3">
         <h3 style={{ color: '#304C64' }}>{processedImage.fileName}</h3>
-        {onEdit && (
+        <div className="flex items-center gap-2">
           <button
-            onClick={() => onEdit(processedImage)}
+            onClick={() => downloadMasks(processedImage)}
             className="px-3 py-2 text-sm rounded-md flex items-center gap-2"
-            style={{ backgroundColor: '#26788E', color: 'white' }}
+            style={{ backgroundColor: 'white', color: '#304C64', borderColor: '#26788E', borderWidth: '1px' }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = '#304C64';
+              e.currentTarget.style.backgroundColor = '#A4CCD4';
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = '#26788E';
+              e.currentTarget.style.backgroundColor = 'white';
             }}
           >
-            <Edit className="h-4 w-4" />
-            Edit Masks
+            Download TIFF
           </button>
-        )}
+
+          {onEdit && (
+            <button
+              onClick={() => onEdit(processedImage)}
+              className="px-3 py-2 text-sm rounded-md flex items-center gap-2"
+              style={{ backgroundColor: '#26788E', color: 'white' }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = '#304C64';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = '#26788E';
+              }}
+            >
+              <Edit className="h-4 w-4" />
+              Edit Masks
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -66,16 +82,7 @@ export function SegmentationViewer({ processedImage, onEdit }: SegmentationViewe
               src={processedImage.result.chromocenterMask}
               alt="Chromocenter overlay"
               className="absolute inset-0 w-full h-full object-contain pointer-events-none"
-            />
-            <img
-              src={processedImage.result.nucleiMask}
-              alt="Nuclei overlay"
-              className="absolute inset-0 w-full h-full object-contain pointer-events-none"
-            />
-            <img
-              src={processedImage.result.backgroundMask}
-              alt="Background overlay"
-              className="absolute inset-0 w-full h-full object-contain pointer-events-none"
+              style={{ opacity: 0.8 }}
             />
           </div>
         </div>
