@@ -8,6 +8,7 @@ it is doing these things
 - preparing an input image the same way as the shared dataset pipeline
 - running U-Net++ inference
 - building a 3-class semantic mask
+- collecting simple review metrics for the results page
 
 output mask values
 - 0   = background
@@ -104,6 +105,110 @@ def build_semantic_mask(pred_mask: np.ndarray) -> np.ndarray:
     return semantic_mask
 
 
+def build_review_metrics(pred_mask: np.ndarray):
+    """
+    build simple review metrics from the predicted mask
+
+    this does not use ground truth.
+    it just gives useful review flags for the results page.
+    """
+    nucleus_mask = (pred_mask == 1) | (pred_mask == 2)
+    chromocenter_mask = (pred_mask == 2)
+
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+        nucleus_mask.astype(np.uint8),
+        connectivity=8,
+    )
+
+    cells_review = []
+    total_chromocenters = 0
+    flagged_cells_count = 0
+
+    image_h, image_w = pred_mask.shape[:2]
+    image_area = image_h * image_w
+
+    for cell_id in range(1, num_labels):
+        x = int(stats[cell_id, cv2.CC_STAT_LEFT])
+        y = int(stats[cell_id, cv2.CC_STAT_TOP])
+        w = int(stats[cell_id, cv2.CC_STAT_WIDTH])
+        h = int(stats[cell_id, cv2.CC_STAT_HEIGHT])
+        nucleus_area = int(stats[cell_id, cv2.CC_STAT_AREA])
+
+        cell_region = labels == cell_id
+        cell_chrom = chromocenter_mask & cell_region
+
+        chrom_num_labels, _, chrom_stats, _ = cv2.connectedComponentsWithStats(
+            cell_chrom.astype(np.uint8),
+            connectivity=8,
+        )
+
+        chromocenter_count = max(0, chrom_num_labels - 1)
+        chromocenter_area = int(cell_chrom.sum())
+        total_chromocenters += chromocenter_count
+
+        chrom_ratio = float(chromocenter_area / nucleus_area) if nucleus_area > 0 else 0.0
+        touches_border = (x == 0) or (y == 0) or (x + w >= image_w) or (y + h >= image_h)
+
+        review_reasons = []
+        review_score = 0
+
+        if nucleus_area < max(20, int(image_area * 0.0005)):
+            review_reasons.append("small nucleus")
+            review_score += 1
+
+        if nucleus_area > int(image_area * 0.30):
+            review_reasons.append("large nucleus")
+            review_score += 1
+
+        if chromocenter_count == 0:
+            review_reasons.append("no chromocenter detected")
+            review_score += 1
+
+        if chromocenter_count > 12:
+            review_reasons.append("many chromocenters")
+            review_score += 1
+
+        if chrom_ratio > 0.60:
+            review_reasons.append("high chromocenter ratio")
+            review_score += 1
+
+        if touches_border:
+            review_reasons.append("touches image border")
+            review_score += 1
+
+        is_flagged = review_score > 0
+        if is_flagged:
+            flagged_cells_count += 1
+
+        cells_review.append({
+            "cell_id": int(cell_id),
+            "nucleus_area": nucleus_area,
+            "chromocenter_area": chromocenter_area,
+            "chromocenter_count": int(chromocenter_count),
+            "chromocenter_ratio": round(chrom_ratio, 4),
+            "touches_border": bool(touches_border),
+            "review_score": int(review_score),
+            "review_reasons": review_reasons,
+            "is_flagged": bool(is_flagged),
+            "bbox": {
+                "x": x,
+                "y": y,
+                "w": w,
+                "h": h,
+            },
+        })
+
+    cells_review.sort(key=lambda row: row["review_score"], reverse=True)
+
+    summary = {
+        "nuclei_count": int(num_labels - 1),
+        "chromocenter_count": int(total_chromocenters),
+        "flagged_cells_count": int(flagged_cells_count),
+    }
+
+    return summary, cells_review
+
+
 def load_unetpp_model():
     """
     load trained U-Net++ model and checkpoint info
@@ -151,6 +256,8 @@ def run_unetpp_inference(image: np.ndarray, model, device, cfg):
     - preprocessed_image
     - pred_mask
     - semantic_mask
+    - summary
+    - cells_review
     """
     img_uint8 = prepare_grayscale_uint8(image)
 
@@ -175,10 +282,13 @@ def run_unetpp_inference(image: np.ndarray, model, device, cfg):
         )
 
     semantic_mask = build_semantic_mask(pred_mask)
+    summary, cells_review = build_review_metrics(pred_mask)
 
     return {
         "prepared_image": img_uint8,
         "preprocessed_image": img_rs,
         "pred_mask": pred_mask,
         "semantic_mask": semantic_mask,
+        "summary": summary,
+        "cells_review": cells_review,
     }

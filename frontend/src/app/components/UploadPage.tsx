@@ -4,15 +4,27 @@ import { ImageUploader } from './ImageUploader';
 import { SegmentationViewer } from './SegmentationViewer';
 import { MaskEditor } from './MaskEditor';
 import { processBatch, ProcessedImage } from '../services/segmentationApi';
+import { useSegmentationSession } from '../context/SegmentationSessionContext';
 
 export function UploadPage() {
-  const [selectedImages, setSelectedImages] = useState<File[]>([]);
-  const [processedImages, setProcessedImages] = useState<ProcessedImage[]>([]);
+  const {
+    selectedImages,
+    setSelectedImages,
+    processedImages,
+    setProcessedImages,
+    modelName,
+    setModelName,
+    clearSession,
+  } = useSegmentationSession();
+
   const [isProcessing, setIsProcessing] = useState(false);
   const [processedCount, setProcessedCount] = useState(0);
   const [editingImage, setEditingImage] = useState<ProcessedImage | null>(null);
-  const [modelName, setModelName] = useState('unetpp');
   const navigate = useNavigate();
+
+  const displayedProcessedCount = isProcessing ? processedCount : processedImages.length;
+  const totalImagesCount =
+    selectedImages.length > 0 ? selectedImages.length : processedImages.length;
 
   const handleImagesSelected = async (files: File[]) => {
     setSelectedImages(files);
@@ -21,11 +33,10 @@ export function UploadPage() {
     setIsProcessing(true);
 
     try {
-      // Process images using the API service
-        const results = await processBatch(files, modelName, (current, total) => {
+      const results = await processBatch(files, modelName, (current) => {
         setProcessedCount(current);
       });
-      
+
       setProcessedImages(results);
     } catch (error: unknown) {
       console.error('Error processing images:', error);
@@ -39,7 +50,7 @@ export function UploadPage() {
   };
 
   const handleViewResults = () => {
-    navigate('/results', { state: { processedImages } });
+    navigate('/results');
   };
 
   const handleSaveMasks = (
@@ -64,90 +75,182 @@ export function UploadPage() {
   };
 
   return (
-    <main className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
-      {selectedImages.length === 0 ? (
-        <div className="max-w-2xl mx-auto">
-          <div className="mb-4">
-            <label style={{ color: '#304C64' }}>Select Model:</label>
-            <select
-              value={modelName}
-              onChange={(e) => setModelName(e.target.value)}
-              style={{
-                marginLeft: '10px',
-                padding: '8px 12px',
-                borderRadius: '6px',
-                border: '1px solid #26788E',
-                color: '#304C64',
-                backgroundColor: 'white',
-              }}
-            >
-              <option value="unetpp">U-Net++</option>
-              <option value="cellpose">Cellpose</option>
-            </select>
-          </div>
+    <main className="max-w-6xl mx-auto px-4 py-10 sm:px-6 lg:px-8">
+      {selectedImages.length === 0 && processedImages.length === 0 ? (
+        <div className="max-w-4xl mx-auto space-y-8">
+          <section
+            className="rounded-2xl p-6 sm:p-8 shadow-sm"
+            style={{
+              backgroundColor: 'white',
+              border: '1px solid #A4CCD4',
+            }}
+          >
+            <div className="flex flex-col gap-6">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <p className="text-sm font-medium tracking-wide uppercase" style={{ color: '#26788E' }}>
+                    Start a new analysis
+                  </p>
+                  <h2 className="mt-1 text-3xl font-semibold" style={{ color: '#304C64' }}>
+                    Upload microscopy images
+                  </h2>
+                  <p className="mt-2 text-sm sm:text-base max-w-2xl" style={{ color: '#5C7285' }}>
+                    Choose a segmentation model, then upload one or more images to generate masks
+                    for chromocenters, nuclei, and background.
+                  </p>
+                </div>
 
-          <ImageUploader onImagesSelected={handleImagesSelected} />
-          <div className="mt-8 rounded-lg p-4" style={{ backgroundColor: '#A4CCD4', borderColor: '#26788E', borderWidth: '1px' }}>
-            <h3 className="text-sm mb-2" style={{ color: '#304C64' }}>About this tool</h3>
-            <p className="text-sm" style={{ color: '#304C64' }}>
-              This tool performs instance segmentation on microscopy images to identify and
-              classify sub-cellular structures. Upload one or more images to get started.
-              The segmentation will identify:
-            </p>
-            <ul className="mt-2 text-sm list-disc list-inside space-y-1" style={{ color: '#304C64' }}>
-              <li><strong>Chromocenter:</strong> Dense chromatin regions</li>
-              <li><strong>Nuclei:</strong> Nuclear regions</li>
-              <li><strong>Background:</strong> Non-nuclear areas</li>
-            </ul>
-          </div>
+                <div className="sm:min-w-[220px]">
+                  <label
+                    className="block text-sm font-medium mb-2"
+                    style={{ color: '#304C64' }}
+                  >
+                    Segmentation Model
+                  </label>
+                  <select
+                    value={modelName}
+                    onChange={(e) => setModelName(e.target.value)}
+                    className="w-full rounded-xl px-4 py-3 outline-none"
+                    style={{
+                      border: '1px solid #26788E',
+                      color: '#304C64',
+                      backgroundColor: 'white',
+                      boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+                    }}
+                  >
+                    <option value="unetpp">U-Net++</option>
+                    <option value="cellpose">Cellpose</option>
+                  </select>
+                </div>
+              </div>
+
+              <ImageUploader onImagesSelected={handleImagesSelected} />
+            </div>
+          </section>
+
+          <section
+            className="rounded-2xl p-6 sm:p-8 shadow-sm"
+            style={{
+              backgroundColor: '#F8FBFC',
+              border: '1px solid #A4CCD4',
+            }}
+          >
+            <div className="grid gap-6 md:grid-cols-[1.2fr_1fr]">
+              <div>
+                <p className="text-sm font-medium tracking-wide uppercase" style={{ color: '#26788E' }}>
+                  About this tool
+                </p>
+                <h3 className="mt-2 text-2xl font-semibold" style={{ color: '#304C64' }}>
+                  Fast sub-cellular instance segmentation
+                </h3>
+                <p className="mt-3 text-sm sm:text-base leading-7" style={{ color: '#5C7285' }}>
+                  This tool performs segmentation on microscopy images to help identify and review
+                  sub-cellular structures. Upload one or more images to begin the analysis and
+                  inspect the generated masks.
+                </p>
+              </div>
+
+              <div
+                className="rounded-2xl p-5"
+                style={{
+                  backgroundColor: '#A4CCD4',
+                  border: '1px solid #26788E',
+                }}
+              >
+                <h4 className="text-base font-semibold mb-3" style={{ color: '#304C64' }}>
+                  Detected structures
+                </h4>
+                <ul className="space-y-3 text-sm sm:text-base" style={{ color: '#304C64' }}>
+                  <li>
+                    <strong>Chromocenter:</strong> Dense chromatin regions
+                  </li>
+                  <li>
+                    <strong>Nuclei:</strong> Nuclear regions
+                  </li>
+                  <li>
+                    <strong>Background:</strong> Non-nuclear areas
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </section>
         </div>
       ) : (
-        <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 style={{ color: '#304C64' }}>Processing Results</h2>
-              <p className="text-sm mt-1" style={{ color: '#26788E' }}>
-                {processedCount} of {selectedImages.length} images processed
-              </p>
-            </div>
-            <div className="flex gap-3">
-              {processedCount === selectedImages.length && !isProcessing && (
+        <div className="space-y-8">
+          <div
+            className="rounded-2xl p-5 sm:p-6 shadow-sm"
+            style={{
+              backgroundColor: 'white',
+              border: '1px solid #A4CCD4',
+            }}
+          >
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-sm font-medium tracking-wide uppercase" style={{ color: '#26788E' }}>
+                  Session overview
+                </p>
+                <h2 className="mt-1 text-2xl font-semibold" style={{ color: '#304C64' }}>
+                  Processing Results
+                </h2>
+                <p className="mt-2 text-sm" style={{ color: '#5C7285' }}>
+                  {displayedProcessedCount} of {totalImagesCount} images processed
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-3">
+                {displayedProcessedCount === totalImagesCount && totalImagesCount > 0 && !isProcessing && (
+                  <button
+                    onClick={handleViewResults}
+                    className="px-5 py-3 text-sm font-medium rounded-xl"
+                    style={{
+                      backgroundColor: '#26788E',
+                      color: 'white',
+                      boxShadow: '0 6px 16px rgba(38, 120, 142, 0.18)',
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#304C64'}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#26788E'}
+                  >
+                    View Results Summary
+                  </button>
+                )}
+
                 <button
-                  onClick={handleViewResults}
-                  className="px-4 py-2 text-sm rounded-md"
-                  style={{ 
-                    backgroundColor: '#26788E',
-                    color: 'white'
+                  onClick={() => {
+                    clearSession();
+                    setProcessedCount(0);
                   }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#304C64'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#26788E'}
+                  className="px-5 py-3 text-sm font-medium rounded-xl"
+                  style={{
+                    backgroundColor: 'white',
+                    border: '1px solid #26788E',
+                    color: '#304C64',
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#F0F7F9'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'white'}
                 >
-                  View Results Summary
+                  Upload New Images
                 </button>
-              )}
-              <button
-                onClick={() => setSelectedImages([])}
-                className="px-4 py-2 text-sm rounded-md"
-                style={{ 
-                  backgroundColor: 'white', 
-                  borderColor: '#26788E', 
-                  borderWidth: '1px',
-                  color: '#304C64'
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#A4CCD4'}
-                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'white'}
-              >
-                Upload New Images
-              </button>
+              </div>
             </div>
           </div>
 
           {isProcessing && (
-            <div className="text-center py-8">
-              <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-solid border-current border-r-transparent" 
-                   style={{ color: '#26788E' }}></div>
-              <p className="mt-4" style={{ color: '#304C64' }}>
-                Processing images... {processedCount} / {selectedImages.length}
+            <div
+              className="rounded-2xl py-14 px-6 text-center shadow-sm"
+              style={{
+                backgroundColor: 'white',
+                border: '1px solid #A4CCD4',
+              }}
+            >
+              <div
+                className="inline-block animate-spin rounded-full h-14 w-14 border-4 border-solid border-current border-r-transparent"
+                style={{ color: '#26788E' }}
+              ></div>
+              <h3 className="mt-5 text-xl font-semibold" style={{ color: '#304C64' }}>
+                Processing images
+              </h3>
+              <p className="mt-2 text-sm sm:text-base" style={{ color: '#5C7285' }}>
+                {displayedProcessedCount} / {totalImagesCount} completed
               </p>
             </div>
           )}

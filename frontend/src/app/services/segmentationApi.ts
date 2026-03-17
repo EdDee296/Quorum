@@ -1,5 +1,29 @@
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
 
+export interface ReviewCell {
+  cell_id: number;
+  nucleus_area: number;
+  chromocenter_area: number;
+  chromocenter_count: number;
+  chromocenter_ratio: number;
+  touches_border: boolean;
+  review_score: number;
+  review_reasons: string[];
+  is_flagged: boolean;
+  bbox: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  };
+}
+
+export interface SegmentationSummary {
+  nuclei_count: number;
+  chromocenter_count: number;
+  flagged_cells_count: number;
+}
+
 export interface SegmentationResult {
   imageUrl: string;
   segmentedImageUrl: string;
@@ -7,6 +31,8 @@ export interface SegmentationResult {
   nucleiMask: string; // Base64 encoded mask image
   backgroundMask: string; // Base64 encoded mask image
   modelSource?: string;
+  summary?: SegmentationSummary;
+  cellsReview?: ReviewCell[];
 }
 
 export interface ProcessedImage {
@@ -16,7 +42,7 @@ export interface ProcessedImage {
 }
 
 /**
- * Upload and process an image through the segmentation model
+ * Uploading and processing an image through the segmentation model
  * @param file - The image file to process
  * @param modelName - Which model to use
  * @returns Promise with segmentation results
@@ -43,7 +69,7 @@ export async function processImage(file: File, modelName: string): Promise<Segme
     ? ensureDataUrl(data.original_base64)
     : localImageUrl;
 
-  // Prefer the 3-class semantic mask; fall back to legacy binary mask_base64
+  
   const rawMask = typeof data.semantic_mask_base64 === 'string' && data.semantic_mask_base64.length > 0
     ? data.semantic_mask_base64
     : data.mask_base64;
@@ -61,11 +87,13 @@ export async function processImage(file: File, modelName: string): Promise<Segme
     nucleiMask,
     backgroundMask,
     modelSource: data.model_source,
+    summary: data.summary,
+    cellsReview: data.cells_review,
   };
 }
 
 /**
- * Update/save edited masks back to the backend
+ * Updates/saves edited masks back to the backend
  * @param fileName - Name of the file being edited
  * @param masks - Updated mask data
  */
@@ -82,7 +110,7 @@ export async function updateMasks(
 }
 
 /**
- * Download TIFF masks for a processed image
+ * Downloads TIFF masks for a processed image
  */
 export async function downloadMasks(processedImage: ProcessedImage): Promise<void> {
   const response = await fetch(`${BASE_URL}/download-masks`, {
@@ -116,7 +144,7 @@ export async function downloadMasks(processedImage: ProcessedImage): Promise<voi
 }
 
 /**
- * Process multiple images in batch
+ * Processes multiple images in batch
  */
 export async function processBatch(
   files: File[],

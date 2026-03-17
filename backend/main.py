@@ -15,7 +15,7 @@ from architecture_team_1.unetpp.infer_unetpp import load_unetpp_model, run_unetp
 
 app = FastAPI()
 
-# let frontend talk to backend
+# lets frontend talk to backend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -24,13 +24,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# load models
+# loads models
 print("Loading models...")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# -----------------------------
 # Cellpose models
-# -----------------------------
 MODEL_PATH_AUG = os.path.join(BASE_DIR, "models", "cp_chromo_aug")
 MODEL_PATH_NO_AUG = os.path.join(BASE_DIR, "models", "cp_chromo_no_aug")
 MODEL_SOURCE = None
@@ -93,9 +91,8 @@ except Exception as e:
     print(f"Warning: Failed to load pretrained nuclei fallback model: {e}")
 
 
-# -----------------------------
+
 # U-Net++ model
-# -----------------------------
 unetpp_model = None
 unetpp_device = None
 unetpp_cfg = None
@@ -221,7 +218,7 @@ async def segment_image(
     model_name: str = Form("unetpp"),
 ):
     try:
-        # read uploaded image
+        # reads uploaded image
         contents = await file.read()
         nparr = np.frombuffer(contents, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
@@ -232,20 +229,18 @@ async def segment_image(
                 detail="Invalid image file or unsupported TIFF encoding",
             )
 
-        # -----------------------------
         # Cellpose path
-        # -----------------------------
         if model_name == "cellpose":
             if model is None:
                 raise HTTPException(status_code=503, detail=MODEL_LOAD_ERROR)
 
             img = prepare_grayscale_uint8(img)
 
-            # run chromocenter model
+            # runs chromocenter model
             chromo_masks, _flows, _styles = model.eval(img, diameter=None, channels=[0, 0])
             chromo_instances = np.asarray(chromo_masks)
 
-            # run nucleus model if we have it
+            # runs nucleus model if we have it
             nucleus_instances = None
             if nucleus_model is not None:
                 nuc_masks, _nf, _ns = nucleus_model.eval(
@@ -257,7 +252,7 @@ async def segment_image(
                 )
                 nucleus_instances = np.asarray(nuc_masks)
 
-            # fallback if custom nucleus model is missing or empty
+            # fallbacks if custom nucleus model is missing or empty
             if (nucleus_instances is None or np.max(nucleus_instances) == 0) and nucleus_fallback_model is not None:
                 fb_masks, _ff, _fs = nucleus_fallback_model.eval(
                     img,
@@ -268,7 +263,7 @@ async def segment_image(
                 )
                 nucleus_instances = np.asarray(fb_masks)
 
-            # build semantic mask
+            # builds semantic mask
             semantic_mask = np.zeros_like(chromo_instances, dtype=np.uint8)
 
             if nucleus_instances is not None:
@@ -276,11 +271,11 @@ async def segment_image(
 
             semantic_mask[chromo_instances > 0] = 255
 
-            # encode original image
+            # encodes original image
             _, original_buffer = cv2.imencode(".png", img)
             original_base64 = base64.b64encode(original_buffer.tobytes()).decode("utf-8")
 
-            # encode mask
+            # encodes mask
             _, mask_buffer = cv2.imencode(".png", semantic_mask)
             mask_base64 = base64.b64encode(mask_buffer.tobytes()).decode("utf-8")
 
@@ -294,9 +289,8 @@ async def segment_image(
                 "nucleus_model_available": nucleus_model is not None,
             }
 
-        # -----------------------------
+        
         # U-Net++ path
-        # -----------------------------
         elif model_name == "unetpp":
             if unetpp_model is None:
                 raise HTTPException(status_code=503, detail=UNETPP_LOAD_ERROR)
@@ -310,12 +304,14 @@ async def segment_image(
 
             prepared_image = result["prepared_image"]
             semantic_mask = result["semantic_mask"]
+            summary = result["summary"]
+            cells_review = result["cells_review"]  
 
-            # encode original image
+            # encodes original image
             _, original_buffer = cv2.imencode(".png", prepared_image)
             original_base64 = base64.b64encode(original_buffer.tobytes()).decode("utf-8")
 
-            # encode mask
+            # encodes mask
             _, mask_buffer = cv2.imencode(".png", semantic_mask)
             mask_base64 = base64.b64encode(mask_buffer.tobytes()).decode("utf-8")
 
@@ -327,6 +323,8 @@ async def segment_image(
                 "model_name": "unetpp",
                 "model_source": UNETPP_SOURCE,
                 "nucleus_model_available": True,
+                "summary": summary,
+                "cells_review": cells_review
             }
 
         else:

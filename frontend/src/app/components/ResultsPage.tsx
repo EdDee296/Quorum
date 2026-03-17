@@ -1,16 +1,16 @@
-import { useLocation, useNavigate } from 'react-router';
+import { useNavigate } from 'react-router';
 import { ArrowLeft, Edit } from 'lucide-react';
 import { useState } from 'react';
 import { MaskEditor } from './MaskEditor';
 import { ProcessedImage } from '../services/segmentationApi';
+import { useSegmentationSession } from '../context/SegmentationSessionContext';
 
 export function ResultsPage() {
-  const location = useLocation();
   const navigate = useNavigate();
-  const [processedImages, setProcessedImages] = useState<ProcessedImage[]>(
-    (location.state?.processedImages || []) as ProcessedImage[]
-  );
+  const { processedImages, setProcessedImages } = useSegmentationSession();
   const [editingImage, setEditingImage] = useState<ProcessedImage | null>(null);
+  const [showAllCells, setShowAllCells] = useState(false);
+  const [showAllImages, setShowAllImages] = useState(false);
 
   const handleEditMask = (image: ProcessedImage) => {
     setEditingImage(image);
@@ -20,7 +20,6 @@ export function ResultsPage() {
     fileName: string,
     masks: { chromocenter: string; nuclei: string; background: string }
   ) => {
-    // Update the processed images with new masks
     setProcessedImages(prev =>
       prev.map(img =>
         img.fileName === fileName
@@ -38,6 +37,27 @@ export function ResultsPage() {
     );
   };
 
+  const summaries = processedImages
+    .map((p) => p.result.summary)
+    .filter(Boolean);
+
+  const totalNuclei = summaries.reduce((sum, s) => sum + (s?.nuclei_count ?? 0), 0);
+  const totalChromocenters = summaries.reduce((sum, s) => sum + (s?.chromocenter_count ?? 0), 0);
+
+  const avgChromocentersPerNucleus =
+    totalNuclei > 0 ? (totalChromocenters / totalNuclei).toFixed(2) : '0.00';
+
+  const allCells = processedImages.flatMap((p) =>
+    (p.result.cellsReview ?? []).map((cell) => ({
+      ...cell,
+      fileName: p.fileName,
+      imageRef: p,
+    }))
+  );
+
+  const visibleCells = showAllCells ? allCells : allCells.slice(0, 10);
+  const visibleProcessedImages = showAllImages ? processedImages : processedImages.slice(0, 10);
+
   if (processedImages.length === 0) {
     return (
       <main className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
@@ -49,7 +69,7 @@ export function ResultsPage() {
           <button
             onClick={() => navigate('/')}
             className="mt-4 px-4 py-2 text-sm rounded-md"
-            style={{ 
+            style={{
               backgroundColor: '#26788E',
               color: 'white'
             }}
@@ -68,9 +88,9 @@ export function ResultsPage() {
           <button
             onClick={() => navigate('/')}
             className="flex items-center gap-2 px-3 py-2 text-sm rounded-md mb-4"
-            style={{ 
-              backgroundColor: 'white', 
-              borderColor: '#26788E', 
+            style={{
+              backgroundColor: 'white',
+              borderColor: '#26788E',
               borderWidth: '1px',
               color: '#304C64'
             }}
@@ -78,12 +98,12 @@ export function ResultsPage() {
             onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'white'}
           >
             <ArrowLeft className="h-4 w-4" />
-            Back to Upload
+            Back
           </button>
 
           <div className="flex items-center justify-between">
             <div>
-              <h2 style={{ color: '#304C64' }}>Segmentation Results</h2>
+              <h2 style={{ color: '#304C64' }}>Results Summary</h2>
               <p className="text-sm mt-1" style={{ color: '#26788E' }}>
                 {processedImages.length} image{processedImages.length !== 1 ? 's' : ''} processed
               </p>
@@ -91,42 +111,177 @@ export function ResultsPage() {
           </div>
         </div>
 
-        <div className="space-y-4">
-          {processedImages.map((processedImg, index) => (
-            <div
-              key={index}
-              className="rounded-lg p-4 flex items-center gap-4"
-              style={{ backgroundColor: 'white', borderColor: '#A4CCD4', borderWidth: '1px' }}
-            >
-              <div className="flex-shrink-0">
-                <img
-                  src={processedImg.result.imageUrl}
-                  alt={processedImg.fileName}
-                  className="w-32 h-32 object-cover rounded"
-                  style={{ borderColor: '#26788E', borderWidth: '1px' }}
-                />
-              </div>
-              <div className="flex-grow">
-                <h3 className="mb-1" style={{ color: '#304C64' }}>{processedImg.fileName}</h3>
-                <p className="text-sm" style={{ color: '#26788E' }}>
-                  {(processedImg.file.size / 1024).toFixed(2)} KB
-                </p>
-              </div>
-              <button
-                onClick={() => handleEditMask(processedImg)}
-                className="px-4 py-2 text-sm rounded-md flex items-center gap-2"
-                style={{ 
-                  backgroundColor: '#26788E',
-                  color: 'white'
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#304C64'}
-                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#26788E'}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+          <div
+            className="rounded-lg p-4"
+            style={{ backgroundColor: 'white', borderColor: '#A4CCD4', borderWidth: '1px' }}
+          >
+            <p className="text-sm" style={{ color: '#26788E' }}>Images Processed</p>
+            <h3 className="mt-2" style={{ color: '#304C64' }}>{processedImages.length}</h3>
+          </div>
+
+          <div
+            className="rounded-lg p-4"
+            style={{ backgroundColor: 'white', borderColor: '#A4CCD4', borderWidth: '1px' }}
+          >
+            <p className="text-sm" style={{ color: '#26788E' }}>Detected Nuclei</p>
+            <h3 className="mt-2" style={{ color: '#304C64' }}>{totalNuclei}</h3>
+          </div>
+
+          <div
+            className="rounded-lg p-4"
+            style={{ backgroundColor: 'white', borderColor: '#A4CCD4', borderWidth: '1px' }}
+          >
+            <p className="text-sm" style={{ color: '#26788E' }}>Detected Chromocenters</p>
+            <h3 className="mt-2" style={{ color: '#304C64' }}>{totalChromocenters}</h3>
+          </div>
+
+          <div
+            className="rounded-lg p-4"
+            style={{ backgroundColor: 'white', borderColor: '#A4CCD4', borderWidth: '1px' }}
+          >
+            <p className="text-sm" style={{ color: '#26788E' }}>Avg Chromocenters / Nucleus</p>
+            <h3 className="mt-2" style={{ color: '#304C64' }}>{avgChromocentersPerNucleus}</h3>
+          </div>
+        </div>
+
+        <div
+          className="rounded-lg p-5 mb-8"
+          style={{ backgroundColor: 'white', borderColor: '#A4CCD4', borderWidth: '1px' }}
+        >
+          <h3 className="mb-2" style={{ color: '#304C64' }}>Processed Images Overview</h3>
+          <p className="text-sm mb-4" style={{ color: '#26788E' }}>
+            Quick access to each processed image so you can review and edit masks easily.
+          </p>
+
+          <div className="space-y-4">
+            {visibleProcessedImages.map((processedImg, index) => (
+              <div
+                key={index}
+                className="rounded-lg p-4 flex items-center gap-4"
+                style={{ backgroundColor: '#F8FBFC', borderColor: '#A4CCD4', borderWidth: '1px' }}
               >
-                <Edit className="h-4 w-4" />
-                Edit Masks
+                <div className="flex-shrink-0">
+                  <img
+                    src={processedImg.result.imageUrl}
+                    alt={processedImg.fileName}
+                    className="w-28 h-28 object-cover rounded"
+                    style={{ borderColor: '#26788E', borderWidth: '1px' }}
+                  />
+                </div>
+
+                <div className="flex-grow">
+                  <h3 className="mb-1" style={{ color: '#304C64' }}>{processedImg.fileName}</h3>
+                  <p className="text-sm" style={{ color: '#26788E' }}>
+                    {(processedImg.file.size / 1024).toFixed(2)} KB
+                  </p>
+                  <p className="text-sm mt-1" style={{ color: '#26788E' }}>
+                    Nuclei: {processedImg.result.summary?.nuclei_count ?? 0} | Chromocenters: {processedImg.result.summary?.chromocenter_count ?? 0}
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => handleEditMask(processedImg)}
+                  className="px-4 py-2 text-sm rounded-md flex items-center gap-2"
+                  style={{
+                    backgroundColor: '#26788E',
+                    color: 'white'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#304C64'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#26788E'}
+                >
+                  <Edit className="h-4 w-4" />
+                  Edit Masks
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {processedImages.length > 10 && (
+            <div className="mt-4">
+              <button
+                onClick={() => setShowAllImages((prev) => !prev)}
+                className="px-4 py-2 text-sm rounded-md"
+                style={{
+                  backgroundColor: 'white',
+                  borderColor: '#26788E',
+                  borderWidth: '1px',
+                  color: '#304C64'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#A4CCD4'}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'white'}
+              >
+                {showAllImages ? 'Show Less' : 'Show All'}
               </button>
             </div>
-          ))}
+          )}
+        </div>
+
+        <div
+          className="rounded-lg p-5"
+          style={{ backgroundColor: 'white', borderColor: '#A4CCD4', borderWidth: '1px' }}
+        >
+          <h3 className="mb-2" style={{ color: '#304C64' }}>All Cells Overview</h3>
+          <p className="text-sm mb-4" style={{ color: '#26788E' }}>
+            Complete list of all detected cells with objective segmentation statistics.
+          </p>
+
+          {allCells.length === 0 ? (
+            <p className="text-sm" style={{ color: '#26788E' }}>
+              No cells were detected in the processed images.
+            </p>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid #A4CCD4', color: '#304C64' }}>
+                      <th className="text-left py-2 pr-4">Image</th>
+                      <th className="text-left py-2 pr-4">Cell ID</th>
+                      <th className="text-left py-2 pr-4">Nucleus Area</th>
+                      <th className="text-left py-2 pr-4">Chromocenter Count</th>
+                      <th className="text-left py-2 pr-4">Chromocenter Area</th>
+                      <th className="text-left py-2 pr-4">Ratio</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleCells.map((cell, index) => (
+                      <tr
+                        key={`${cell.fileName}-${cell.cell_id}-${index}`}
+                        style={{ borderBottom: '1px solid #E6EEF1', color: '#304C64' }}
+                      >
+                        <td className="py-3 pr-4">{cell.fileName}</td>
+                        <td className="py-3 pr-4">{cell.cell_id}</td>
+                        <td className="py-3 pr-4">{cell.nucleus_area}</td>
+                        <td className="py-3 pr-4">{cell.chromocenter_count}</td>
+                        <td className="py-3 pr-4">{cell.chromocenter_area}</td>
+                        <td className="py-3 pr-4">{cell.chromocenter_ratio}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {allCells.length > 10 && (
+                <div className="mt-4">
+                  <button
+                    onClick={() => setShowAllCells((prev) => !prev)}
+                    className="px-4 py-2 text-sm rounded-md"
+                    style={{
+                      backgroundColor: 'white',
+                      borderColor: '#26788E',
+                      borderWidth: '1px',
+                      color: '#304C64'
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#A4CCD4'}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'white'}
+                  >
+                    {showAllCells ? 'Show Less' : 'Show All'}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
         </div>
       </main>
 
