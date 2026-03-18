@@ -9,7 +9,6 @@ export function ResultsPage() {
   const navigate = useNavigate();
   const { processedImages, setProcessedImages } = useSegmentationSession();
   const [editingImage, setEditingImage] = useState<ProcessedImage | null>(null);
-  const [showAllCells, setShowAllCells] = useState(false);
   const [showAllImages, setShowAllImages] = useState(false);
 
   const handleEditMask = (image: ProcessedImage) => {
@@ -47,15 +46,29 @@ export function ResultsPage() {
   const avgChromocentersPerNucleus =
     totalNuclei > 0 ? (totalChromocenters / totalNuclei).toFixed(2) : '0.00';
 
-  const allCells = processedImages.flatMap((p) =>
-    (p.result.cellsReview ?? []).map((cell) => ({
-      ...cell,
-      fileName: p.fileName,
-      imageRef: p,
-    }))
+  const uncertaintySummaries = processedImages
+    .map((p) => p.result.uncertaintySummary)
+    .filter(Boolean);
+
+  const avgAgreement = uncertaintySummaries.length > 0
+    ? (
+        uncertaintySummaries.reduce((sum, u) => sum + (u?.mean_agreement ?? 0), 0) /
+        uncertaintySummaries.length
+      ).toFixed(2)
+    : '0.00';
+
+  const avgChromAgreement = uncertaintySummaries.length > 0
+    ? (
+        uncertaintySummaries.reduce((sum, u) => sum + (u?.chromocenter_agreement ?? 0), 0) /
+        uncertaintySummaries.length
+      ).toFixed(2)
+    : '0.00';
+
+  const totalNeedsReview = processedImages.reduce(
+    (sum, img) => sum + (img.result.uncertaintySummary?.needs_review ? 1 : 0),
+    0
   );
 
-  const visibleCells = showAllCells ? allCells : allCells.slice(0, 10);
   const visibleProcessedImages = showAllImages ? processedImages : processedImages.slice(0, 10);
 
   if (processedImages.length === 0) {
@@ -178,6 +191,11 @@ export function ResultsPage() {
                   <p className="text-sm mt-1" style={{ color: '#26788E' }}>
                     Nuclei: {processedImg.result.summary?.nuclei_count ?? 0} | Chromocenters: {processedImg.result.summary?.chromocenter_count ?? 0}
                   </p>
+                  {processedImg.result.uncertaintySummary && (
+                    <p className="text-sm mt-1" style={{ color: '#26788E' }}>
+                      Confidence: {processedImg.result.uncertaintySummary.confidence_label} | Agreement: {(processedImg.result.uncertaintySummary.mean_agreement * 100).toFixed(1)}%
+                    </p>
+                  )}
                 </div>
 
                 <button
@@ -221,67 +239,86 @@ export function ResultsPage() {
           className="rounded-lg p-5"
           style={{ backgroundColor: 'white', borderColor: '#A4CCD4', borderWidth: '1px' }}
         >
-          <h3 className="mb-2" style={{ color: '#304C64' }}>All Cells Overview</h3>
+          <h3 className="mb-2" style={{ color: '#304C64' }}>Prediction Confidence Summary</h3>
           <p className="text-sm mb-4" style={{ color: '#26788E' }}>
-            Complete list of all detected cells with objective segmentation statistics.
+            Confidence is estimated using multiple test-time augmentation views. Lower agreement may indicate that the prediction should be reviewed manually.
           </p>
 
-          {allCells.length === 0 ? (
-            <p className="text-sm" style={{ color: '#26788E' }}>
-              No cells were detected in the processed images.
-            </p>
-          ) : (
-            <>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm border-collapse">
-                  <thead>
-                    <tr style={{ borderBottom: '1px solid #A4CCD4', color: '#304C64' }}>
-                      <th className="text-left py-2 pr-4">Image</th>
-                      <th className="text-left py-2 pr-4">Cell ID</th>
-                      <th className="text-left py-2 pr-4">Nucleus Area</th>
-                      <th className="text-left py-2 pr-4">Chromocenter Count</th>
-                      <th className="text-left py-2 pr-4">Chromocenter Area</th>
-                      <th className="text-left py-2 pr-4">Ratio</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visibleCells.map((cell, index) => (
-                      <tr
-                        key={`${cell.fileName}-${cell.cell_id}-${index}`}
-                        style={{ borderBottom: '1px solid #E6EEF1', color: '#304C64' }}
-                      >
-                        <td className="py-3 pr-4">{cell.fileName}</td>
-                        <td className="py-3 pr-4">{cell.cell_id}</td>
-                        <td className="py-3 pr-4">{cell.nucleus_area}</td>
-                        <td className="py-3 pr-4">{cell.chromocenter_count}</td>
-                        <td className="py-3 pr-4">{cell.chromocenter_area}</td>
-                        <td className="py-3 pr-4">{cell.chromocenter_ratio}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div
+              className="rounded-lg p-4"
+              style={{ backgroundColor: '#F8FBFC', borderColor: '#A4CCD4', borderWidth: '1px' }}
+            >
+              <p className="text-sm" style={{ color: '#26788E' }}>Average Pixel Agreement</p>
+              <h3 className="mt-2" style={{ color: '#304C64' }}>{(Number(avgAgreement) * 100).toFixed(1)}%</h3>
+            </div>
 
-              {allCells.length > 10 && (
-                <div className="mt-4">
+            <div
+              className="rounded-lg p-4"
+              style={{ backgroundColor: '#F8FBFC', borderColor: '#A4CCD4', borderWidth: '1px' }}
+            >
+              <p className="text-sm" style={{ color: '#26788E' }}>Average Chromocenter Agreement</p>
+              <h3 className="mt-2" style={{ color: '#304C64' }}>{(Number(avgChromAgreement) * 100).toFixed(1)}%</h3>
+            </div>
+
+            <div
+              className="rounded-lg p-4"
+              style={{ backgroundColor: '#F8FBFC', borderColor: '#A4CCD4', borderWidth: '1px' }}
+            >
+              <p className="text-sm" style={{ color: '#26788E' }}>Images Needing Review</p>
+              <h3 className="mt-2" style={{ color: '#304C64' }}>{totalNeedsReview}</h3>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            {processedImages.map((processedImg, index) => {
+              const uncertainty = processedImg.result.uncertaintySummary;
+
+              return (
+                <div
+                  key={index}
+                  className="rounded-lg p-4 flex items-center justify-between gap-4"
+                  style={{ backgroundColor: '#F8FBFC', borderColor: '#A4CCD4', borderWidth: '1px' }}
+                >
+                  <div>
+                    <h4 style={{ color: '#304C64' }}>{processedImg.fileName}</h4>
+
+                    {uncertainty ? (
+                      <>
+                        <p className="text-sm mt-1" style={{ color: '#26788E' }}>
+                          Confidence: {uncertainty.confidence_label}
+                        </p>
+                        <p className="text-sm mt-1" style={{ color: '#26788E' }}>
+                          Pixel agreement: {(uncertainty.mean_agreement * 100).toFixed(1)}% | Chromocenter agreement: {(uncertainty.chromocenter_agreement * 100).toFixed(1)}%
+                        </p>
+                        <p className="text-sm mt-1" style={{ color: uncertainty.confidence_label === 'Low' ? '#E2480C' : '#26788E' }}>
+                          Prediction stability: {uncertainty.confidence_label}
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-sm mt-1" style={{ color: '#26788E' }}>
+                        No confidence information available for this image.
+                      </p>
+                    )}
+                  </div>
+
                   <button
-                    onClick={() => setShowAllCells((prev) => !prev)}
-                    className="px-4 py-2 text-sm rounded-md"
+                    onClick={() => handleEditMask(processedImg)}
+                    className="px-4 py-2 text-sm rounded-md flex items-center gap-2"
                     style={{
-                      backgroundColor: 'white',
-                      borderColor: '#26788E',
-                      borderWidth: '1px',
-                      color: '#304C64'
+                      backgroundColor: '#26788E',
+                      color: 'white'
                     }}
-                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#A4CCD4'}
-                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'white'}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#304C64'}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#26788E'}
                   >
-                    {showAllCells ? 'Show Less' : 'Show All'}
+                    <Edit className="h-4 w-4" />
+                    Review / Edit
                   </button>
                 </div>
-              )}
-            </>
-          )}
+              );
+            })}
+          </div>
         </div>
       </main>
 

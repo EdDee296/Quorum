@@ -9,6 +9,7 @@ it is doing these things
 - running U-Net++ inference
 - building a 3-class semantic mask
 - collecting simple review metrics for the results page
+- estimating prediction confidence using simple test-time augmentation (TTA)
 
 output mask values
 - 0   = background
@@ -137,7 +138,7 @@ def build_review_metrics(pred_mask: np.ndarray):
         cell_region = labels == cell_id
         cell_chrom = chromocenter_mask & cell_region
 
-        chrom_num_labels, _, chrom_stats, _ = cv2.connectedComponentsWithStats(
+        chrom_num_labels, _, _chrom_stats, _ = cv2.connectedComponentsWithStats(
             cell_chrom.astype(np.uint8),
             connectivity=8,
         )
@@ -209,6 +210,85 @@ def build_review_metrics(pred_mask: np.ndarray):
     return summary, cells_review
 
 
+def _predict_mask_from_preprocessed(img_rs: np.ndarray, model, device) -> np.ndarray:
+    """
+    run model on one already-preprocessed + resized image
+    returns class mask at resized resolution
+    """
+    img_tensor = torch.from_numpy(img_rs).unsqueeze(0).unsqueeze(0).float().to(device)
+
+    with torch.no_grad():
+        logits = model(img_tensor)
+        pred_mask = torch.argmax(logits, dim=1)[0].cpu().numpy().astype(np.uint8)
+
+    return pred_mask
+
+
+def build_uncertainty_summary(img_pp: np.ndarray, model, device, original_size):
+    """
+    estimate prediction confidence using simple test-time augmentation
+
+    we run inference on:
+    - original image
+    - horizontal flip
+    - vertical flip
+
+    then we flip predictions back and measure pixel agreement.
+
+    output
+    - uncertainty_summary: dict
+    """
+    original_h, original_w = original_size
+
+    pred_original = _predict_mask_from_preprocessed(img_pp, model, device)
+
+    img_hflip = np.ascontiguousarray(np.fliplr(img_pp))
+    pred_hflip = _predict_mask_from_preprocessed(img_hflip, model, device)
+    pred_hflip = np.fliplr(pred_hflip)
+
+    img_vflip = np.ascontiguousarray(np.flipud(img_pp))
+    pred_vflip = _predict_mask_from_preprocessed(img_vflip, model, device)
+    pred_vflip = np.flipud(pred_vflip)
+
+    stacked = np.stack([pred_original, pred_hflip, pred_vflip], axis=0)
+
+    agreement_map = np.all(stacked == stacked[0:1], axis=0)
+    mean_agreement = float(agreement_map.mean())
+
+    chrom_presence = np.any(stacked == 2, axis=0)
+    chrom_all_same = np.all(stacked == 2, axis=0)
+    chrom_pixels = int(chrom_presence.sum())
+
+    if chrom_pixels > 0:
+        chromocenter_agreement = float(chrom_all_same.sum() / chrom_pixels)
+    else:
+        chromocenter_agreement = 1.0
+
+    if mean_agreement >= 0.75 and chromocenter_agreement >= 0.70:
+        confidence_label = "High"
+        needs_review = False
+    elif mean_agreement >= 0.60 and chromocenter_agreement >= 0.50:
+        confidence_label = "Moderate"
+        needs_review = False
+    else:
+        confidence_label = "Low"
+        needs_review = True
+
+    uncertainty_summary = {
+        "mean_agreement": round(mean_agreement, 4),
+        "chromocenter_agreement": round(chromocenter_agreement, 4),
+        "confidence_label": confidence_label,
+        "needs_review": bool(needs_review),
+        "tta_views_used": 3,
+        "resized_height": int(img_pp.shape[0]),
+        "resized_width": int(img_pp.shape[1]),
+        "original_height": int(original_h),
+        "original_width": int(original_w),
+    }
+
+    return uncertainty_summary
+
+
 def load_unetpp_model():
     """
     load trained U-Net++ model and checkpoint info
@@ -258,6 +338,7 @@ def run_unetpp_inference(image: np.ndarray, model, device, cfg):
     - semantic_mask
     - summary
     - cells_review
+    - uncertainty_summary
     """
     img_uint8 = prepare_grayscale_uint8(image)
 
@@ -267,22 +348,24 @@ def run_unetpp_inference(image: np.ndarray, model, device, cfg):
     img_pp = preprocess_image_for_unetpp(img_uint8, preprocess_mode=preprocess_mode)
     img_rs = resize_for_unetpp(img_pp, target_size=target_size)
 
-    img_tensor = torch.from_numpy(img_rs).unsqueeze(0).unsqueeze(0).float().to(device)
+    pred_mask_rs = _predict_mask_from_preprocessed(img_rs, model, device)
 
-    with torch.no_grad():
-        logits = model(img_tensor)
-        pred_mask = torch.argmax(logits, dim=1)[0].cpu().numpy().astype(np.uint8)
+    original_h, original_w = img_uint8.shape[:2]
 
-        original_h, original_w = img_uint8.shape[:2]
-
-        pred_mask = cv2.resize(
-            pred_mask,
-            (original_w, original_h),
-            interpolation=cv2.INTER_NEAREST,
-        )
+    pred_mask = cv2.resize(
+        pred_mask_rs,
+        (original_w, original_h),
+        interpolation=cv2.INTER_NEAREST,
+    )
 
     semantic_mask = build_semantic_mask(pred_mask)
     summary, cells_review = build_review_metrics(pred_mask)
+    uncertainty_summary = build_uncertainty_summary(
+        img_pp=img_rs,
+        model=model,
+        device=device,
+        original_size=(original_h, original_w),
+    )
 
     return {
         "prepared_image": img_uint8,
@@ -291,4 +374,5 @@ def run_unetpp_inference(image: np.ndarray, model, device, cfg):
         "semantic_mask": semantic_mask,
         "summary": summary,
         "cells_review": cells_review,
+        "uncertainty_summary": uncertainty_summary,
     }

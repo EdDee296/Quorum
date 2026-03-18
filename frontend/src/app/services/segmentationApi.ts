@@ -26,6 +26,18 @@ export interface SegmentationSummary {
   flagged_cells_count: number;
 }
 
+export interface UncertaintySummary {
+  mean_agreement: number;
+  chromocenter_agreement: number;
+  confidence_label: string;
+  needs_review: boolean;
+  tta_views_used: number;
+  resized_height: number;
+  resized_width: number;
+  original_height: number;
+  original_width: number;
+}
+
 export interface SegmentationResult {
   imageUrl: string;
   segmentedImageUrl: string;
@@ -36,6 +48,7 @@ export interface SegmentationResult {
   modelName?: string;
   summary?: SegmentationSummary;
   cellsReview?: ReviewCell[];
+  uncertaintySummary?: UncertaintySummary;
 }
 
 export interface ProcessedImage {
@@ -102,6 +115,7 @@ export async function processImage(file: File, modelName: string): Promise<Segme
     modelName: data.model_name,
     summary: data.summary,
     cellsReview: data.cells_review,
+    uncertaintySummary: data.uncertainty_summary,
   };
 }
 

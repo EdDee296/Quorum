@@ -354,6 +354,7 @@ async def segment_image(
             semantic_mask = result["semantic_mask"]
             summary = result["summary"]
             cells_review = result["cells_review"]
+            uncertainty_summary = result["uncertainty_summary"]
 
             # encodes original image
             _, original_buffer = cv2.imencode(".png", prepared_image)
@@ -372,7 +373,8 @@ async def segment_image(
                 "model_source": UNETPP_SOURCE,
                 "nucleus_model_available": True,
                 "summary": summary,
-                "cells_review": cells_review
+                "cells_review": cells_review,
+                "uncertainty_summary": uncertainty_summary,
             }
 
         else:
