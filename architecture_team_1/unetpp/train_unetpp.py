@@ -303,7 +303,7 @@ def main():
     ).to(device)
 
     loss_fn = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.Adam(model.parameters(), lr=2e-4)
 
     # we are saving best based on chromocenter dice (class 2)
     best_val_dice2 = -1.0

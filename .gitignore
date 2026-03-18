@@ -18,6 +18,8 @@ config.yaml
 
 node_modules/
 frontend/node_modules/
+!backend/models/
+!backend/models/*.pt
 
 # Training outputs
 architecture_team_1/unetpp/runs_unetpp/

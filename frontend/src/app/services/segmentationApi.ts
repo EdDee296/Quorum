@@ -33,6 +33,7 @@ export interface SegmentationResult {
   nucleiMask: string; // Base64 encoded mask image
   backgroundMask: string; // Base64 encoded mask image
   modelSource?: string;
+  modelName?: string;
   summary?: SegmentationSummary;
   cellsReview?: ReviewCell[];
 }
@@ -76,18 +77,29 @@ export async function processImage(file: File, modelName: string): Promise<Segme
     : data.mask_base64;
   const semanticDataUrl = ensureDataUrl(rawMask);
 
-  const chromocenterMask  = await colorizeMask(semanticDataUrl, [226, 72, 12], (r) => r >= 200);
-  const nucleiMask        = await colorizeMask(semanticDataUrl, [38, 120, 142], (r) => r >= 100 && r < 200);
-  const backgroundMask    = await colorizeMask(semanticDataUrl, [164, 204, 212], (r) => r < 100);
-  const segmentedImageUrl = await overlayMaskOnImage(imageUrl, chromocenterMask);
+  const chromocenterMask = await colorizeMask(semanticDataUrl, [226, 72, 12], (r) => r >= 200);
+  const nucleiMask = await colorizeMask(semanticDataUrl, [38, 120, 142], (r) => r >= 100 && r < 200);
+  const backgroundMask = await colorizeMask(semanticDataUrl, [164, 204, 212], (r) => r < 100);
+
+  let finalChrom = chromocenterMask;
+  let finalNuclei = nucleiMask;
+  let finalBg = backgroundMask;
+
+  if (data.model_name === 'cellpose') {
+    finalNuclei = await createBlankMask(semanticDataUrl);
+    finalBg = await createBlankMask(semanticDataUrl);
+  }
+
+  const segmentedImageUrl = await overlayMaskOnImage(imageUrl, finalChrom);
 
   return {
     imageUrl,
     segmentedImageUrl,
-    chromocenterMask,
-    nucleiMask,
-    backgroundMask,
+    chromocenterMask: finalChrom,
+    nucleiMask: finalNuclei,
+    backgroundMask: finalBg,
     modelSource: data.model_source,
+    modelName: data.model_name,
     summary: data.summary,
     cellsReview: data.cells_review,
   };
@@ -231,7 +243,7 @@ function colorizeMask(maskDataUrl: string, color: [number, number, number], matc
       for (let index = 0; index < imageData.data.length; index += 4) {
         const shouldFill = match(imageData.data[index]);
 
-        imageData.data[index]     = shouldFill ? color[0] : 0;
+        imageData.data[index] = shouldFill ? color[0] : 0;
         imageData.data[index + 1] = shouldFill ? color[1] : 0;
         imageData.data[index + 2] = shouldFill ? color[2] : 0;
         imageData.data[index + 3] = shouldFill ? 180 : 0;
