@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+python-multipart
+cellpose
+opencv-python-headless
+numpy

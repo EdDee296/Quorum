@@ -2,6 +2,9 @@ __pycache__/
 *.pyc
 .env
 .DS_Store
+/backend/.venv/
+/backend/__pycache__/
+/node_modules/.vite/
 /data/
 *.ipynb_checkpoints
 *.pth
@@ -12,3 +15,12 @@ models/
 predictions/
 /venv/
 config.yaml
+
+node_modules/
+frontend/node_modules/
+!backend/models/
+!backend/models/*.pt
+
+# Training outputs
+architecture_team_1/unetpp/runs_unetpp/
+architecture_team_1/unetpp/outputs_unetpp/
