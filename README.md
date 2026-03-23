@@ -36,6 +36,30 @@ Quorum/
 │       ├── train_cellpose.py
 │       ├── eval_cellpose.py
 │       └── infer_cellpose.py
+├── architecture_team_4/        # deepLabV3 model
+│   ├── deeplabv3_model.py
+│   │
+│   ├── deeplabv3/
+│   │   ├── sanity_check_deeplabv3.py
+│   │   ├── train_deeplabv3.py
+│   │   ├── eval_deeplabv3.py
+│   │   ├── infer_deeplabv3.py
+│   │   ├── runs_deeplabv3/
+│   │   └── outputs_deeplabv3/
+│   │
+│   └── README.md
+├── architecture_team_5/         # deepLabV3+ model
+│   ├── deeplabv3plus_model.py
+│   │
+│   ├── deeplabv3plus/
+│   │   ├── sanity_check_deeplabv3plus.py
+│   │   ├── train_deeplabv3plus.py
+│   │   ├── eval_deeplabv3plus.py
+│   │   ├── infer_deeplabv3plus.py
+│   │   ├── runs_deeplabv3plus/
+│   │   └── outputs_deeplabv3plus/
+│   │
+│   └── README.md
 ├── backend/                    # FastAPI backend
 │   ├── main.py
 │   └── models/                 # Trained model files
