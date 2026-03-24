@@ -58,33 +58,68 @@ import segmentation_models_pytorch as smp
 
 
 def load_config():
+    """
+    Loading config.yaml file.
+    """
     with open("config.yaml", "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
 def dice_iou_for_class(pred, gt, cls):
     """
-    pred, gt: HxW int arrays in {0,1,2}
-    cls: class id to evaluate (1 nucleus, 2 chromocenter)
+    Computing Dice and IoU for a single class.
+
+    Args:
+        pred (ndarray): HxW predicted mask with values {0,1,2}
+        gt (ndarray):   HxW ground truth mask with values {0,1,2}
+        cls (int):      class id to evaluate (1 nucleus, 2 chromocenter)
+
+    Returns:
+        tuple:
+            dice (float)
+            iou (float)
     """
+    # selecting foreground pixels for this class
     p = (pred == cls)
     g = (gt == cls)
 
+    # computing overlap and union
     inter = np.logical_and(p, g).sum()
     union = np.logical_or(p, g).sum()
+
     p_sum = p.sum()
     g_sum = g.sum()
 
+    # computing Dice and IoU
     denom = p_sum + g_sum
-    dice = 1.0 if denom == 0 else (2.0 * inter) / float(denom)
-    iou = 1.0 if union == 0 else inter / float(union)
+    if denom == 0:
+        dice = 1.0
+    else:
+        dice = (2.0 * inter) / float(denom)
+
+    if union == 0:
+        iou = 1.0
+    else:
+        iou = inter / float(union)
+
     return float(dice), float(iou)
 
 
 def save_scaled_mask(mask_hw, out_path):
     """
-    mask_hw values {0,1,2} which is saved as uint8 with 0/127/255 so it looks correct in viewers
+    Saving predicted mask in scaled format for visualization.
+
+    Args:
+        mask_hw (ndarray): HxW mask with values {0,1,2}
+        out_path (str): path to save .tif file
+
+    Output:
+        Writes scaled mask to disk where:
+            0   -> background
+            127 -> nucleus
+            255 -> chromocenter
     """
+    # creating visualization version of mask
     vis = np.zeros_like(mask_hw, dtype=np.uint8)
     vis[mask_hw == 1] = 127
     vis[mask_hw == 2] = 255
@@ -92,9 +127,26 @@ def save_scaled_mask(mask_hw, out_path):
 
 
 def main():
+    """
+    Running full evaluation pipeline.
+
+    What this function does:
+    - loads config and validation dataset
+    - loads trained U-Net++ checkpoint
+    - runs inference on validation images
+    - computes Dice and IoU for nucleus and chromocenter
+    - saves predicted masks and metrics.csv
+    - prints summary results
+
+    Output:
+        - metrics.csv inside outputs_unetpp/
+        - predicted masks inside outputs_unetpp/pred_masks/
+    """
     t0 = time.time()
 
     cfg = load_config()
+
+    # selecting device
     if torch.cuda.is_available():
         device = "cuda"
     else:
@@ -104,10 +156,10 @@ def main():
     preprocess_mode = cfg.get("preprocess_mode", "basic")
     target_size = tuple(cfg.get("target_size", [256, 256]))
 
-    # eval always uses val_ids.txt
+    # loading fixed validation split
     val_ids = CellDataset.load_split_ids("val_ids.txt")
 
-    # no augmentation for eval
+    # creating validation dataset (no augmentation)
     val_ds = CellDataset(
         root_dir=root_dir,
         preprocess_mode=preprocess_mode,
@@ -116,6 +168,7 @@ def main():
         split_ids=val_ids,
     )
 
+    # defining the checkpoint and output paths
     ckpt_path = os.path.join("architecture_team_1", "unetpp", "runs_unetpp", "best_unetpp.pt")
     out_dir = os.path.join("architecture_team_1", "unetpp", "outputs_unetpp")
     pred_dir = os.path.join(out_dir, "pred_masks")
@@ -134,28 +187,30 @@ def main():
         classes=3,
     ).to(device)
 
+    # loading trained weights
     ckpt = torch.load(ckpt_path, map_location=device)
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
 
     rows = []
 
+    # going over the validation images
     for i in range(len(val_ds)):
-        img, gt_mask = val_ds[i]                    # img: (1,H,W), gt_mask: (H,W)
-        cid = val_ds.samples[i]                     # this is the numeric id string like "109"
+        img, gt_mask = val_ds[i]                    
+        cid = val_ds.samples[i]                    
+        img = img.unsqueeze(0).to(device)   # adding batch dimension         
 
-        img = img.unsqueeze(0).to(device)           # (1,1,H,W)
-
+        # running inference
         with torch.no_grad():
-            logits = model(img)                     # (1,3,H,W)
-            pred = torch.argmax(logits, dim=1)[0].cpu().numpy().astype(np.uint8)  # (H,W)
+            logits = model(img)                    
+            pred = torch.argmax(logits, dim=1)[0].cpu().numpy().astype(np.uint8)
 
         gt = gt_mask.cpu().numpy().astype(np.uint8)
 
         dice1, iou1 = dice_iou_for_class(pred, gt, cls=1)  # nucleus
         dice2, iou2 = dice_iou_for_class(pred, gt, cls=2)  # chromocenter
 
-        # Save scaled so viewable mask only
+        # saving predicted mask
         out_path = os.path.join(pred_dir, f"Pred_mask_{cid}.tif")
         save_scaled_mask(pred, out_path)
 
@@ -168,6 +223,7 @@ def main():
             "pred_mask_file": os.path.basename(out_path),
         })
 
+    # saving metrics to CSV
     df = pd.DataFrame(rows)
     os.makedirs(out_dir, exist_ok=True)
     csv_path = os.path.join(out_dir, "metrics.csv")

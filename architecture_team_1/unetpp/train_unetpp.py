@@ -27,6 +27,8 @@ python -m architecture_team_1.unetpp.train_unetpp
 outputs
 - best checkpoint
   architecture_team_1/unetpp/runs_unetpp/best_unetpp.pt
+- backend copy of best checkpoint
+  backend/models/best_unetpp.pt
 - training log
   architecture_team_1/unetpp/runs_unetpp/train_log.csv
 """
@@ -44,15 +46,31 @@ from data_utils.dataset import CellDataset
 
 
 def load_config():
+    """
+    loads config.yaml from the project root and returns it as a dict
+    """
     with open("config.yaml", "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
 def build_train_val_ids(root_dir, preprocess_mode, target_size, val_ids_path):
+    """
+    builds the train/val split in a reproducible way
+
+    what it does
+    - reads val_ids.txt to get the fixed validation ids
+    - scans the dataset to find all valid cell ids
+    - returns train_ids = all_ids minus val_ids
+
+    output
+    - train_ids: list[str]
+    - val_ids: list[str]
+    """
+    # reading fixed validation ids
     val_ids = CellDataset.load_split_ids(val_ids_path)
     val_set = set(val_ids)
 
-    # this is just discovering all valid ids that have both masks
+    # scanning dataset to find all valid cell ids
     ds_all = CellDataset(
         root_dir=root_dir,
         preprocess_mode=preprocess_mode,
@@ -63,6 +81,7 @@ def build_train_val_ids(root_dir, preprocess_mode, target_size, val_ids_path):
 
     all_ids = ds_all.samples
 
+    # building train_ids by excluding validation ids
     train_ids = []
     i = 0
     while i < len(all_ids):
@@ -75,40 +94,73 @@ def build_train_val_ids(root_dir, preprocess_mode, target_size, val_ids_path):
 
 
 def dice_iou_for_class(pred_hw, target_hw, class_id):
-    # pred_hw and target_hw are [H,W] ints in {0,1,2}
+    """
+    computes Dice + IoU for ONE class only
+
+    inputs
+    - pred_hw: [H,W] ints (0/1/2)
+    - target_hw: [H,W] ints (0/1/2)
+    - class_id: 1 (nucleus) or 2 (chromocenter)
+
+    output
+    - (dice, iou): floats
+    """
+    # selecting only pixels that belong to this class
     pred_fg = (pred_hw == class_id)
     targ_fg = (target_hw == class_id)
 
+    # computing intersection and union
     inter = np.logical_and(pred_fg, targ_fg).sum()
     union = np.logical_or(pred_fg, targ_fg).sum()
 
+    # counting foreground pixels
     pred_sum = pred_fg.sum()
     targ_sum = targ_fg.sum()
 
     denom = pred_sum + targ_sum
-    dice = 1.0 if denom == 0 else (2.0 * inter) / float(denom)
-    iou = 1.0 if union == 0 else inter / float(union)
+    if denom == 0:
+        dice = 1.0
+    else:
+        dice = (2.0 * inter) / float(denom)
+
+    if union == 0:
+        iou = 1.0
+    else:
+        iou = inter / float(union)
 
     return float(dice), float(iou)
 
 
 def eval_one_epoch(model, loader, device):
-    model.eval()
+    """
+    runs 1 full pass over the validation loader (no gradients)
 
+    what it does
+    - model predicts logits [B,3,H,W]
+    - we take argmax -> predicted class per pixel [B,H,W]
+    - compute dice/iou for nucleus (class 1) and chromocenter (class 2)
+
+    output
+    - val_dice1, val_iou1, val_dice2, val_iou2 (averaged across all images)
+    """
+    model.eval()  # turning off dropout/batchnorm updates
+
+    # accumulating metrics across validation set
     dice1_sum = 0.0
     iou1_sum = 0.0
     dice2_sum = 0.0
     iou2_sum = 0.0
     count = 0
 
-    with torch.no_grad():
+    with torch.no_grad():  # disabling gradient computation
         for imgs, masks in loader:
-            imgs = imgs.to(device)    # [B,1,H,W]
-            masks = masks.to(device)  # [B,H,W]
+            imgs = imgs.to(device)    
+            masks = masks.to(device)  
 
-            logits = model(imgs)                 # [B,3,H,W]
-            preds = torch.argmax(logits, dim=1)  # [B,H,W]
+            logits = model(imgs)                 
+            preds = torch.argmax(logits, dim=1)  # predicted class per pixel
 
+            # looping through batch images
             b = 0
             while b < preds.shape[0]:
                 pred_np = preds[b].detach().cpu().numpy()
@@ -136,7 +188,18 @@ def eval_one_epoch(model, loader, device):
 
 
 def train_one_epoch(model, loader, optimizer, loss_fn, device):
-    model.train()
+    """
+    runs 1 full training epoch
+
+    what it does
+    - forward pass - logits [B,3,H,W]
+    - CrossEntropyLoss compares logits vs masks [B,H,W]
+    - backward + optimizer step
+
+    output
+    - average training loss for this epoch
+    """
+    model.train() # enabling training mode
 
     loss_total = 0.0
     count = 0
@@ -145,12 +208,12 @@ def train_one_epoch(model, loader, optimizer, loss_fn, device):
         imgs = imgs.to(device)
         masks = masks.to(device)
 
-        logits = model(imgs)          # [B,3,H,W]
-        loss = loss_fn(logits, masks) # CrossEntropy expects masks as [B,H,W] long
+        logits = model(imgs)          # forward pass
+        loss = loss_fn(logits, masks) # multi-class cross entropy
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        optimizer.zero_grad() # clearing old gradients
+        loss.backward() # backpropagation
+        optimizer.step()  # updating weights
 
         loss_total += float(loss.item())
         count += 1
@@ -162,8 +225,27 @@ def train_one_epoch(model, loader, optimizer, loss_fn, device):
 
 
 def main():
+    """
+    main training entry point.
+
+    what this function does:
+    - reading config.yaml for dataset + training settings
+    - building train/validation split using val_ids.txt
+    - creating datasets and dataloaders
+    - building U-Net++ model (3 classes)
+    - training for multiple epochs
+    - computing validation Dice/IoU for nucleus and chromocenter
+    - saving best checkpoint based on chromocenter Dice
+    - logging training progress into train_log.csv
+
+    outputs:
+    - best_unetpp.pt saved in runs_unetpp/
+    - best_unetpp.pt copied to backend/models/
+    - train_log.csv saved in runs_unetpp/   
+    """
     cfg = load_config()
 
+    # reading config values
     root_dir = cfg["data_root"]
     preprocess_mode = cfg.get("preprocess_mode", "basic")
     target_size = tuple(cfg.get("target_size", [256, 256]))
@@ -176,7 +258,7 @@ def main():
         device = "cuda"
     else:
         device = "cpu"
-        
+
     print("Device:", device)
     print("data_root:", root_dir)
     print("preprocess_mode:", preprocess_mode)
@@ -184,6 +266,7 @@ def main():
     print("augmentation:", aug_strength)
     print("out_dir:", out_dir)
 
+    # building train/val split
     train_ids, val_ids = build_train_val_ids(
         root_dir=root_dir,
         preprocess_mode=preprocess_mode,
@@ -191,6 +274,7 @@ def main():
         val_ids_path="val_ids.txt",
     )
 
+    # creating training dataset (with augmentation)
     train_ds = CellDataset(
         root_dir=root_dir,
         preprocess_mode=preprocess_mode,
@@ -199,6 +283,7 @@ def main():
         split_ids=train_ids,
     )
 
+    # creating validation dataset (no augmentation)
     val_ds = CellDataset(
         root_dir=root_dir,
         preprocess_mode=preprocess_mode,
@@ -218,11 +303,14 @@ def main():
     ).to(device)
 
     loss_fn = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.Adam(model.parameters(), lr=2e-4)
 
     # we are saving best based on chromocenter dice (class 2)
     best_val_dice2 = -1.0
     best_path = os.path.join(out_dir, "best_unetpp.pt")
+
+    backend_best_path = os.path.join("backend", "models", "best_unetpp.pt")
+    os.makedirs(os.path.join("backend", "models"), exist_ok=True)
 
     log_path = os.path.join(out_dir, "train_log.csv")
     if not os.path.exists(log_path):
@@ -264,19 +352,22 @@ def main():
 
         if val_dice2 > best_val_dice2:
             best_val_dice2 = val_dice2
-            torch.save(
-                {
-                    "model_state_dict": model.state_dict(),
-                    "epoch": epoch,
-                    "val_dice_class1": val_dice1,
-                    "val_iou_class1": val_iou1,
-                    "val_dice_class2": val_dice2,
-                    "val_iou_class2": val_iou2,
-                    "config": cfg,
-                },
-                best_path,
-            )
+
+            checkpoint_data = {
+                "model_state_dict": model.state_dict(),
+                "epoch": epoch,
+                "val_dice_class1": val_dice1,
+                "val_iou_class1": val_iou1,
+                "val_dice_class2": val_dice2,
+                "val_iou_class2": val_iou2,
+                "config": cfg,
+            }
+
+            torch.save(checkpoint_data, best_path)
+            torch.save(checkpoint_data, backend_best_path)
+
             print("Saved best >", best_path)
+            print("Saved backend copy >", backend_best_path)
 
         epoch += 1
 
