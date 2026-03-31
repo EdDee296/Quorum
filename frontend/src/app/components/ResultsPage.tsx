@@ -50,16 +50,16 @@ export function ResultsPage() {
     .map((p) => p.result.uncertaintySummary)
     .filter(Boolean);
 
-  const avgAgreement = uncertaintySummaries.length > 0
+  const avgConfidence = uncertaintySummaries.length > 0
     ? (
-        uncertaintySummaries.reduce((sum, u) => sum + (u?.mean_agreement ?? 0), 0) /
+        uncertaintySummaries.reduce((sum, u) => sum + (u?.mean_confidence ?? 0), 0) /
         uncertaintySummaries.length
       ).toFixed(2)
     : '0.00';
 
-  const avgChromAgreement = uncertaintySummaries.length > 0
+  const avgEntropy = uncertaintySummaries.length > 0
     ? (
-        uncertaintySummaries.reduce((sum, u) => sum + (u?.chromocenter_agreement ?? 0), 0) /
+        uncertaintySummaries.reduce((sum, u) => sum + (u?.normalized_mean_entropy ?? 0), 0) /
         uncertaintySummaries.length
       ).toFixed(2)
     : '0.00';
@@ -193,7 +193,7 @@ export function ResultsPage() {
                   </p>
                   {processedImg.result.uncertaintySummary && (
                     <p className="text-sm mt-1" style={{ color: '#26788E' }}>
-                      Confidence: {processedImg.result.uncertaintySummary.confidence_label} | Agreement: {(processedImg.result.uncertaintySummary.mean_agreement * 100).toFixed(1)}%
+                      Confidence: {processedImg.result.uncertaintySummary.confidence_label} | Score: {(processedImg.result.uncertaintySummary.mean_confidence * 100).toFixed(1)}%
                     </p>
                   )}
                 </div>
@@ -241,7 +241,7 @@ export function ResultsPage() {
         >
           <h3 className="mb-2" style={{ color: '#304C64' }}>Prediction Confidence Summary</h3>
           <p className="text-sm mb-4" style={{ color: '#26788E' }}>
-            Confidence is estimated using multiple test-time augmentation views. Lower agreement may indicate that the prediction should be reviewed manually.
+            Confidence is estimated using multiple test-time augmentation views. Higher entropy may indicate that the prediction should be reviewed manually.
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
@@ -249,16 +249,16 @@ export function ResultsPage() {
               className="rounded-lg p-4"
               style={{ backgroundColor: '#F8FBFC', borderColor: '#A4CCD4', borderWidth: '1px' }}
             >
-              <p className="text-sm" style={{ color: '#26788E' }}>Average Pixel Agreement</p>
-              <h3 className="mt-2" style={{ color: '#304C64' }}>{(Number(avgAgreement) * 100).toFixed(1)}%</h3>
+              <p className="text-sm" style={{ color: '#26788E' }}>Average Confidence</p>
+              <h3 className="mt-2" style={{ color: '#304C64' }}>{(Number(avgConfidence) * 100).toFixed(1)}%</h3>
             </div>
 
             <div
               className="rounded-lg p-4"
               style={{ backgroundColor: '#F8FBFC', borderColor: '#A4CCD4', borderWidth: '1px' }}
             >
-              <p className="text-sm" style={{ color: '#26788E' }}>Average Chromocenter Agreement</p>
-              <h3 className="mt-2" style={{ color: '#304C64' }}>{(Number(avgChromAgreement) * 100).toFixed(1)}%</h3>
+              <p className="text-sm" style={{ color: '#26788E' }}>Average Entropy</p>
+              <h3 className="mt-2" style={{ color: '#304C64' }}>{Number(avgEntropy).toFixed(3)}</h3>
             </div>
 
             <div
@@ -289,7 +289,7 @@ export function ResultsPage() {
                           Confidence: {uncertainty.confidence_label}
                         </p>
                         <p className="text-sm mt-1" style={{ color: '#26788E' }}>
-                          Pixel agreement: {(uncertainty.mean_agreement * 100).toFixed(1)}% | Chromocenter agreement: {(uncertainty.chromocenter_agreement * 100).toFixed(1)}%
+                          Confidence: {(uncertainty.mean_confidence * 100).toFixed(1)}% | Entropy: {uncertainty.normalized_mean_entropy.toFixed(3)}
                         </p>
                         <p className="text-sm mt-1" style={{ color: uncertainty.confidence_label === 'Low' ? '#E2480C' : '#26788E' }}>
                           Prediction stability: {uncertainty.confidence_label}

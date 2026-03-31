@@ -9,7 +9,8 @@ it is doing these things
 - running U-Net++ inference
 - building a 3-class semantic mask
 - collecting simple review metrics for the results page
-- estimating prediction confidence using simple test-time augmentation (TTA)
+- estimating prediction confidence using test-time augmentation (TTA)
+  with entropy from averaged softmax probabilities
 
 output mask values
 - 0   = background
@@ -210,78 +211,115 @@ def build_review_metrics(pred_mask: np.ndarray):
     return summary, cells_review
 
 
-def _predict_mask_from_preprocessed(img_rs: np.ndarray, model, device) -> np.ndarray:
+def _predict_probs_from_preprocessed(img_rs: np.ndarray, model, device) -> torch.Tensor:
     """
     run model on one already-preprocessed + resized image
-    returns class mask at resized resolution
+    returns softmax probabilities at resized resolution as [C,H,W]
     """
     img_tensor = torch.from_numpy(img_rs).unsqueeze(0).unsqueeze(0).float().to(device)
 
     with torch.no_grad():
         logits = model(img_tensor)
-        pred_mask = torch.argmax(logits, dim=1)[0].cpu().numpy().astype(np.uint8)
+        probs = torch.softmax(logits, dim=1)[0].detach().cpu()
 
-    return pred_mask
+    return probs
 
 
-def build_uncertainty_summary(img_pp: np.ndarray, model, device, original_size):
+def _apply_tta_numpy(img_rs: np.ndarray, mode: str) -> np.ndarray:
     """
-    estimate prediction confidence using simple test-time augmentation
+    apply deterministic TTA to resized image
+    """
+    if mode == "orig":
+        return img_rs
+    if mode == "hflip":
+        return np.ascontiguousarray(np.fliplr(img_rs))
+    if mode == "vflip":
+        return np.ascontiguousarray(np.flipud(img_rs))
+    if mode == "rot90":
+        return np.ascontiguousarray(np.rot90(img_rs, k=1))
 
-    we run inference on:
-    - original image
-    - horizontal flip
-    - vertical flip
+    raise ValueError(f"Unknown TTA mode: {mode}")
 
-    then we flip predictions back and measure pixel agreement.
+
+def _invert_tta_probs(probs_chw: torch.Tensor, mode: str) -> torch.Tensor:
+    """
+    invert deterministic TTA on probability tensor [C,H,W]
+    """
+    if mode == "orig":
+        return probs_chw
+    if mode == "hflip":
+        return torch.flip(probs_chw, dims=[2])
+    if mode == "vflip":
+        return torch.flip(probs_chw, dims=[1])
+    if mode == "rot90":
+        return torch.rot90(probs_chw, k=3, dims=[1, 2])
+
+    raise ValueError(f"Unknown TTA mode: {mode}")
+
+
+def predict_with_tta(img_rs: np.ndarray, model, device):
+    """
+    run TTA inference and return:
+    - mean_probs_rs: [C,H,W]
+    - pred_mask_rs: [H,W]
+    - entropy_rs: [H,W]
+    """
+    tta_modes = ["orig", "hflip", "vflip", "rot90"]
+    probs_list = []
+
+    for mode in tta_modes:
+        aug_img = _apply_tta_numpy(img_rs, mode)
+        probs = _predict_probs_from_preprocessed(aug_img, model, device)
+        probs = _invert_tta_probs(probs, mode)
+        probs_list.append(probs)
+
+    prob_stack = torch.stack(probs_list, dim=0)    # [T,C,H,W]
+    mean_probs_rs = prob_stack.mean(dim=0)         # [C,H,W]
+    pred_mask_rs = torch.argmax(mean_probs_rs, dim=0).numpy().astype(np.uint8)
+
+    eps = 1e-8
+    entropy_rs = -torch.sum(mean_probs_rs * torch.log(mean_probs_rs + eps), dim=0).numpy().astype(np.float32)
+
+    return mean_probs_rs, pred_mask_rs, entropy_rs
+
+
+def build_uncertainty_summary(mean_probs_rs: torch.Tensor, entropy_rs: np.ndarray, original_size):
+    """
+    estimate uncertainty from averaged TTA softmax probabilities
 
     output
     - uncertainty_summary: dict
     """
     original_h, original_w = original_size
 
-    pred_original = _predict_mask_from_preprocessed(img_pp, model, device)
+    mean_confidence = float(torch.max(mean_probs_rs, dim=0).values.mean().item())
+    mean_entropy = float(entropy_rs.mean())
+    max_entropy = float(entropy_rs.max())
 
-    img_hflip = np.ascontiguousarray(np.fliplr(img_pp))
-    pred_hflip = _predict_mask_from_preprocessed(img_hflip, model, device)
-    pred_hflip = np.fliplr(pred_hflip)
+    # normalized entropy for 3 classes
+    max_possible_entropy = float(np.log(3.0))
+    normalized_mean_entropy = mean_entropy / max_possible_entropy if max_possible_entropy > 0 else 0.0
 
-    img_vflip = np.ascontiguousarray(np.flipud(img_pp))
-    pred_vflip = _predict_mask_from_preprocessed(img_vflip, model, device)
-    pred_vflip = np.flipud(pred_vflip)
-
-    stacked = np.stack([pred_original, pred_hflip, pred_vflip], axis=0)
-
-    agreement_map = np.all(stacked == stacked[0:1], axis=0)
-    mean_agreement = float(agreement_map.mean())
-
-    chrom_presence = np.any(stacked == 2, axis=0)
-    chrom_all_same = np.all(stacked == 2, axis=0)
-    chrom_pixels = int(chrom_presence.sum())
-
-    if chrom_pixels > 0:
-        chromocenter_agreement = float(chrom_all_same.sum() / chrom_pixels)
-    else:
-        chromocenter_agreement = 1.0
-
-    if mean_agreement >= 0.75 and chromocenter_agreement >= 0.70:
+    if normalized_mean_entropy <= 0.20 and mean_confidence >= 0.85:
         confidence_label = "High"
         needs_review = False
-    elif mean_agreement >= 0.60 and chromocenter_agreement >= 0.50:
-        confidence_label = "Moderate"
+    elif normalized_mean_entropy <= 0.35 and mean_confidence >= 0.70:
+        confidence_label = "Medium"
         needs_review = False
     else:
         confidence_label = "Low"
         needs_review = True
 
     uncertainty_summary = {
-        "mean_agreement": round(mean_agreement, 4),
-        "chromocenter_agreement": round(chromocenter_agreement, 4),
+        "mean_confidence": round(mean_confidence, 4),
+        "mean_entropy": round(mean_entropy, 4),
+        "max_entropy": round(max_entropy, 4),
+        "normalized_mean_entropy": round(normalized_mean_entropy, 4),
         "confidence_label": confidence_label,
         "needs_review": bool(needs_review),
-        "tta_views_used": 3,
-        "resized_height": int(img_pp.shape[0]),
-        "resized_width": int(img_pp.shape[1]),
+        "tta_views_used": 4,
+        "resized_height": int(entropy_rs.shape[0]),
+        "resized_width": int(entropy_rs.shape[1]),
         "original_height": int(original_h),
         "original_width": int(original_w),
     }
@@ -302,9 +340,8 @@ def load_unetpp_model():
     cfg = load_config()
 
     checkpoint_path = os.path.join(
-        "architecture_team_1",
-        "unetpp",
-        "runs_unetpp",
+        "backend",
+        "models",
         "best_unetpp.pt",
     )
 
@@ -348,7 +385,7 @@ def run_unetpp_inference(image: np.ndarray, model, device, cfg):
     img_pp = preprocess_image_for_unetpp(img_uint8, preprocess_mode=preprocess_mode)
     img_rs = resize_for_unetpp(img_pp, target_size=target_size)
 
-    pred_mask_rs = _predict_mask_from_preprocessed(img_rs, model, device)
+    mean_probs_rs, pred_mask_rs, entropy_rs = predict_with_tta(img_rs, model, device)
 
     original_h, original_w = img_uint8.shape[:2]
 
@@ -361,9 +398,8 @@ def run_unetpp_inference(image: np.ndarray, model, device, cfg):
     semantic_mask = build_semantic_mask(pred_mask)
     summary, cells_review = build_review_metrics(pred_mask)
     uncertainty_summary = build_uncertainty_summary(
-        img_pp=img_rs,
-        model=model,
-        device=device,
+        mean_probs_rs=mean_probs_rs,
+        entropy_rs=entropy_rs,
         original_size=(original_h, original_w),
     )
 

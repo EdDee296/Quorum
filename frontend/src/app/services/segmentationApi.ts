@@ -27,8 +27,10 @@ export interface SegmentationSummary {
 }
 
 export interface UncertaintySummary {
-  mean_agreement: number;
-  chromocenter_agreement: number;
+  mean_confidence: number;
+  mean_entropy: number;
+  max_entropy: number;
+  normalized_mean_entropy: number;
   confidence_label: string;
   needs_review: boolean;
   tta_views_used: number;
