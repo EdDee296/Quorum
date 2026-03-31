@@ -31,6 +31,13 @@ Quorum/
 │       ├── train_unetpp.py
 │       ├── eval_unetpp.py
 │       └── infer_unetpp.py
+├── architecture_team_2/        # U-Net model
+│   └── unet/
+│       ├── runs_unet/
+│       │   └── best_unet.pt
+│       └── outputs_unet/
+│           ├── metrics.csv
+│           └── pred_masks/
 ├── architecture_team_3/        # Cellpose model
 │   └── cellpose/
 │       ├── train_cellpose.py
