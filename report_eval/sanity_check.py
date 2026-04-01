@@ -40,9 +40,6 @@ def warn(msg):
     print(f"{WARN} {msg}")
 
 
-# ─────────────────────────────────────────────
-# 1. config.yaml
-# ─────────────────────────────────────────────
 print("\n── 1. config.yaml ──")
 config_path = os.path.join(ROOT, "config.yaml")
 cfg = None
@@ -81,9 +78,7 @@ else:
         fail(f"Could not parse config.yaml: {e}")
 
 
-# ─────────────────────────────────────────────
-# 2. val_ids.txt
-# ─────────────────────────────────────────────
+#  val_ids.txt
 print("\n── 2. val_ids.txt ──")
 val_ids_path = os.path.join(ROOT, "val_ids.txt")
 if not os.path.exists(val_ids_path):
@@ -97,9 +92,7 @@ else:
         ok(f"val_ids.txt found: {len(ids)} validation IDs")
 
 
-# ─────────────────────────────────────────────
-# 3. Dataset loads
-# ─────────────────────────────────────────────
+# Dataset loads
 print("\n── 3. Dataset loading ──")
 if cfg is not None:
     try:
@@ -126,9 +119,7 @@ else:
     print(f"{SKIP} Skipping dataset check (config.yaml failed)")
 
 
-# ─────────────────────────────────────────────
-# 4. Model checkpoints
-# ─────────────────────────────────────────────
+# Model checkpoints
 print("\n── 4. Model checkpoints ──")
 
 checkpoints = {
@@ -171,9 +162,7 @@ elif found_count < 4:
     warn(f"Only {found_count}/4 checkpoints found — missing models will show as N/A in figures")
 
 
-# ─────────────────────────────────────────────
-# 5. Python dependencies
-# ─────────────────────────────────────────────
+# Python dependencies
 print("\n── 5. Python dependencies ──")
 
 deps = [
@@ -217,9 +206,6 @@ except Exception:
     pass
 
 
-# ─────────────────────────────────────────────
-# 6. Training logs (for learning curves)
-# ─────────────────────────────────────────────
 print("\n── 6. Training logs (for learning curves figure) ──")
 
 train_logs = {
@@ -244,9 +230,6 @@ if logs_found == 0:
     warn("No training logs found — learning_curves.png will be skipped entirely")
 
 
-# ─────────────────────────────────────────────
-# 7. Output folder writable?
-# ─────────────────────────────────────────────
 print("\n── 7. Output directory ──")
 out_dir = os.path.join(THIS_DIR, "outputs")
 try:
@@ -260,9 +243,6 @@ except Exception as e:
     fail(f"Cannot write to output directory: {e}")
 
 
-# ─────────────────────────────────────────────
-# Final verdict
-# ─────────────────────────────────────────────
 print(f"\n{'='*55}")
 if all_ok:
     print("  ALL CHECKS PASSED — you are ready to run:")

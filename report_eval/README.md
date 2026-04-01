@@ -50,8 +50,6 @@ report_eval/outputs/
     ├── boxplot_dice_chromocenter.png  ← variance/robustness per model
     ├── boxplot_dice_nucleoplasm.png
     ├── scatter_chrom_dice.png   ← per-image pairwise comparison
-    ├── learning_curves.png      ← training loss + val Dice per epoch
-    ├── win_rate.png             ← how often each model ranks #1
     ├── confusion_<model>.png    ← where each model fails (one per model)
     └── comparison_cell<id>.png  ← Original | GT | all models | error maps
                                     (5 cells: worst/25th/median/75th/best)
@@ -82,8 +80,7 @@ Missing checkpoints are skipped gracefully.
 | `bar_dice.png` | Main results figure |
 | `boxplot_dice_chromocenter.png` | Shows consistency, not just mean |
 | `scatter_chrom_dice.png` | Shows per-image differences between models |
-| `learning_curves.png` | "Learning curve" claim — steeper = better |
-| `comparison_cell*.png` | Qualitative figure the prof asked for: GT + all model predictions + error maps |
+| `comparison_cell*.png` | Qualitative figure: GT + all model predictions + error maps |
 | `confusion_<model>.png` | Error analysis section |
 
 ---
